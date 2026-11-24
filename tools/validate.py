@@ -187,6 +187,155 @@ for i, x in enumerate(lst(fl, 'stats', 'flows', req=False)):
 strlist(fl, 'us', 'flows', req=False); s(fl, 'take', 'flows', maxlen=240)
 sources(fl, 'sources', 'flows')
 
+# ---------- 놓치면 안 될 정보 보강 (11/25 추가) ----------
+for i, c in enumerate(mk.get('cards') or []):
+    if isinstance(c, dict):
+        if c.get('easy') is None: warn(f'mustKnow.cards[{i}].easy', '"쉽게 말하면" 한 줄이 있으면 좋아요')
+        else: s(c, 'easy', f'mustKnow.cards[{i}]', maxlen=90)
+for i, c in enumerate(mk.get('calendar') or []):
+    if isinstance(c, dict):
+        q = f'mustKnow.calendar[{i}]'
+        s(c, 'exp', q, req=False, maxlen=30); s(c, 'prev', q, req=False, maxlen=30); s(c, 'why', q, req=False, maxlen=110)
+        if 'sc' in c and not isinstance(c['sc'], bool): err(f'{q}.sc', 'true/false')
+rd = mk.get('radar')
+if not isinstance(rd, dict): err('mustKnow.radar', '없어요 (위험 레이더)')
+else:
+    s(rd, 'label', 'mustKnow.radar', maxlen=40); s(rd, 'take', 'mustKnow.radar', req=False, maxlen=120)
+    for i, x in enumerate(lst(rd, 'items', 'mustKnow.radar', mn=4)):
+        q = f'mustKnow.radar.items[{i}]'
+        s(x, 'name', q, maxlen=16); s(x, 'value', q, maxlen=14); s(x, 'note', q, maxlen=90)
+        if x.get('lv') not in (0, 1, 2): err(f'{q}.lv', '0(안정)·1(조금 불안)·2(불안) 중 하나')
+sc = mk.get('sectors')
+if sc is not None:
+    if not isinstance(sc, dict): err('mustKnow.sectors', '객체여야 해요')
+    else:
+        s(sc, 'label', 'mustKnow.sectors', maxlen=50); s(sc, 'sky', 'mustKnow.sectors', req=False); s(sc, 'skyWord', 'mustKnow.sectors', req=False, maxlen=12)
+        if 'skyPct' in sc: n(sc, 'skyPct', 'mustKnow.sectors')
+        b = sc.get('breadth')
+        if b is not None:
+            n(b, 'up', 'mustKnow.sectors.breadth'); n(b, 'down', 'mustKnow.sectors.breadth'); n(b, 'flat', 'mustKnow.sectors.breadth', req=False)
+        for i, x in enumerate(lst(sc, 'items', 'mustKnow.sectors', req=b is None, mn=0 if b is not None else 2)):
+            q = f'mustKnow.sectors.items[{i}]'
+            s(x, 'name', q, maxlen=10); n(x, 'pct', q); s(x, 'note', q, req=False, maxlen=24)
+        s(sc, 'note', 'mustKnow.sectors', req=False, maxlen=120)
+wl = lst(mk, 'watch', 'mustKnow', mn=2)
+if len(wl) > 5: warn('mustKnow.watch', '5개 이하 권장')
+for i, x in enumerate(wl):
+    q = f'mustKnow.watch[{i}]'
+    s(x, 't', q, maxlen=24); s(x, 'now', q, maxlen=40); s(x, 'why', q, maxlen=60)
+
+# ---------- 새 탭 (11/25 추가) ----------
+DIRS = (-1, 0, 1)
+ch = d.get('chain')
+if not isinstance(ch, dict): err('chain', '없어요 (연결고리 탭)')
+else:
+    s(ch, 'intro', 'chain', req=False, maxlen=90)
+    its = lst(ch, 'items', 'chain', mn=1)
+    if len(its) > 4: warn('chain.items', '4개 이하 권장')
+    for i, x in enumerate(its):
+        q = f'chain.items[{i}]'
+        s(x, 'icon', q); s(x, 'title', q, maxlen=24); s(x, 'when', q, req=False, maxlen=30); s(x, 'take', q, maxlen=120)
+        st = lst(x, 'steps', q, mn=3)
+        if len(st) > 7: warn(f'{q}.steps', '7단계 이하 권장')
+        for j, y in enumerate(st):
+            r = f'{q}.steps[{j}]'
+            s(y, 't', r, maxlen=24); s(y, 's', r, req=False, maxlen=40); s(y, 'v', r, req=False, maxlen=16)
+            if 'dir' in y and y['dir'] not in DIRS: err(f'{r}.dir', '-1, 0, 1 중 하나')
+    sources(ch, 'sources', 'chain')
+
+wa = d.get('wallet')
+if not isinstance(wa, dict): err('wallet', '없어요 (내 지갑 탭)')
+else:
+    s(wa, 'intro', 'wallet', req=False, maxlen=90); s(wa, 'fxLabel', 'wallet', maxlen=24); s(wa, 'prevLabel', 'wallet', req=False, maxlen=16)
+    ids = []
+    for i, x in enumerate(lst(wa, 'fx', 'wallet', mn=1)):
+        q = f'wallet.fx[{i}]'
+        if x.get('id') not in ('USD', 'JPY', 'EUR', 'CNY'): err(f'{q}.id', "'USD'/'JPY'/'EUR'/'CNY' 중 하나")
+        ids.append(x.get('id'))
+        s(x, 'name', q); s(x, 'flag', q, req=False)
+        for k in ('per', 'rate'):
+            v = n(x, k, q)
+            if v is not None and v <= 0: err(f'{q}.{k}', '0보다 커야 해요')
+        if 'prev' in x: n(x, 'prev', q)
+    if len(set(ids)) != len(ids): err('wallet.fx', '같은 통화가 두 번 있어요')
+    for i, x in enumerate(lst(wa, 'items', 'wallet', mn=3)):
+        q = f'wallet.items[{i}]'
+        s(x, 'icon', q); s(x, 'name', q, maxlen=16); s(x, 'd', q, maxlen=40); s(x, 'note', q, req=False, maxlen=80); s(x, 'sub', q, req=False, maxlen=40)
+        if x.get('value') is None and not (isinstance(x.get('text'), str) and x['text'].strip()): err(q, 'value(숫자) 또는 text(문자) 중 하나는 있어야 해요')
+        for k in ('value', 'prev', 'chg', 'pct', 'dp'):
+            if k in x: n(x, k, q)
+        s(x, 'text', q, req=False, maxlen=14); s(x, 'unit', q, req=False); s(x, 'prevLabel', q, req=False)
+    strlist(wa, 'tips', 'wallet', req=False, maxlen=90)
+    sources(wa, 'sources', 'wallet')
+
+wf = d.get('whatif')
+if not isinstance(wf, dict): err('whatif', '없어요 (만약에 탭)')
+else:
+    s(wf, 'intro', 'whatif', req=False, maxlen=90); s(wf, 'calcNote', 'whatif', maxlen=120); s(wf, 'fxNote', 'whatif', req=False, maxlen=160)
+    for i, x in enumerate(lst(wf, 'scenarios', 'whatif')):
+        q = f'whatif.scenarios[{i}]'
+        s(x, 'icon', q); s(x, 'title', q, maxlen=24); s(x, 'd', q, maxlen=40); s(x, 'base', q, maxlen=80); s(x, 'mine', q, req=False, maxlen=120)
+        for j, c in enumerate(lst(x, 'cases', q, mn=2)):
+            s(c, 'k', f'{q}.cases[{j}]', maxlen=14); strlist(c, 'p', f'{q}.cases[{j}]', mn=1, maxlen=60)
+    for i, x in enumerate(lst(wf, 'rules', 'whatif', mn=3)):
+        s(x, 'a', f'whatif.rules[{i}]', maxlen=16); s(x, 'b', f'whatif.rules[{i}]', maxlen=80)
+    sources(wf, 'sources', 'whatif')
+
+wd = d.get('words')
+if not isinstance(wd, dict): err('words', '없어요 (용어 풀이 탭)')
+else:
+    s(wd, 'intro', 'words', req=False, maxlen=90)
+    for i, x in enumerate(lst(wd, 'items', 'words', mn=6)):
+        q = f'words.items[{i}]'
+        s(x, 'w', q, maxlen=20); s(x, 'cat', q, maxlen=8); s(x, 'easy', q, maxlen=140); s(x, 'ex', q, req=False, maxlen=100)
+    if wd.get('sources') is not None: sources(wd, 'sources', 'words')
+
+qz = d.get('quiz')
+if not isinstance(qz, dict): err('quiz', '없어요 (퀴즈 탭)')
+else:
+    s(qz, 'title', 'quiz', maxlen=24)
+    if 'id' in qz: s(qz, 'id', 'quiz')
+    its = lst(qz, 'items', 'quiz', mn=3)
+    if len(its) > 6: warn('quiz.items', '6문제 이하 권장')
+    for i, x in enumerate(its):
+        q = f'quiz.items[{i}]'
+        s(x, 'q', q, maxlen=60); s(x, 'why', q, maxlen=120)
+        o = lst(x, 'opts', q, mn=2)
+        if len(o) > 4: err(f'{q}.opts', '보기는 4개까지예요')
+        strlist(x, 'opts', q, mn=2, maxlen=24)
+        a_ = x.get('a')
+        if not (isinstance(a_, int) and not isinstance(a_, bool) and 0 <= a_ < len(o)): err(f'{q}.a', f'정답 번호는 0~{len(o) - 1} 사이 정수예요')
+    if its:
+        pos = [x.get('a') for x in its if isinstance(x, dict)]
+        if len(set(pos)) == 1 and len(pos) >= 3: warn('quiz.items', '정답 위치가 모두 같아요. 섞어 주세요')
+
+ak = d.get('ask')
+if not isinstance(ak, dict): err('ask', '없어요 (물어보면 탭)')
+else:
+    s(ak, 'intro', 'ask', req=False, maxlen=90); s(ak, 'note', 'ask', req=False, maxlen=90)
+    its = lst(ak, 'items', 'ask', mn=3)
+    if len(its) > 7: warn('ask.items', '7개 이하 권장')
+    TABIDS = ('movers', 'must', 'brokers', 'kr', 'global', 'flows', 'chain', 'wallet', 'whatif', 'words', 'quiz', 'ask')
+    for i, x in enumerate(its):
+        q = f'ask.items[{i}]'
+        s(x, 'q', q, maxlen=40); s(x, 'short', q, maxlen=50); strlist(x, 'a', q, mn=1, maxlen=90)
+        if len(x.get('a') or []) > 4: warn(f'{q}.a', '4줄 이하 권장')
+        if 'tab' in x and x['tab'] not in TABIDS: err(f'{q}.tab', f'탭 id가 아니에요: {x["tab"]}')
+        s(x, 'tabLabel', q, req=False, maxlen=20)
+    sources(ak, 'sources', 'ask')
+
+# ---------- 투자 권유처럼 읽히는 말 막기 ----------
+BAN = re.compile(r'(사세요|파세요|매수하세요|매도하세요|추천합니다|추천 종목|꼭 사|지금 사야|담으세요)')
+def walk(x, p):
+    if isinstance(x, str):
+        m = BAN.search(x)
+        if m and not URL.match(x): err(p, f'투자 권유처럼 읽혀요: "{m.group(0)}"')
+    elif isinstance(x, dict):
+        for k, v in x.items(): walk(v, f'{p}.{k}')
+    elif isinstance(x, list):
+        for i, v in enumerate(x): walk(v, f'{p}[{i}]')
+walk(d, 'top')
+
 for w in warns: print('⚠️ ', w)
 for e in errors: print('❌', e)
 print(f'{"통과" if not errors else "실패"}: 오류 {len(errors)}개, 경고 {len(warns)}개 ({PATH})')
