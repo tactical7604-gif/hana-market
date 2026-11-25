@@ -412,6 +412,20 @@ else:
         if x.get('grp') not in ('kr', 'us', 'cmd', 'fx'): err(f'{q}.grp', "'kr'·'us'·'cmd'·'fx' 중 하나")
         if 'cur' in x and x['cur'] not in ('원', '$'): err(f'{q}.cur', "'원' 또는 '$'")
         if 'close' in x and not re.match(r'^\d{2}:\d{2}$', str(x['close'])): err(f'{q}.close', '"HH:MM" (한국시간)')
+        y1 = x.get('y1')  # 사람 모형: 1년(52주) 최저·최고 (없어도 돼요)
+        if y1 is not None:
+            if not (isinstance(y1, dict) and is_num(y1.get('lo')) and is_num(y1.get('hi')) and 0 < y1['lo'] < y1['hi']):
+                err(f'{q}.y1', '{"lo": 1년 최저, "hi": 1년 최고, "d": "YYYY-MM-DD"} 형식이고 0 < lo < hi 여야 해요')
+            elif not DATE.match(str(y1.get('d', ''))):
+                err(f'{q}.y1.d', '1년 최저·최고를 확인한 날짜(YYYY-MM-DD)를 써 주세요')
+            else:
+                am0 = a.get(mkt) if mkt in ('kr', 'us') else None
+                if isinstance(am0, str) and DATE.match(am0) and (datetime.date.fromisoformat(am0) - datetime.date.fromisoformat(y1['d'])).days > 10:
+                    warn(f'{q}.y1', f"{y1['d']}에 확인한 값이에요. 토요일 실행 때 다시 확인해 주세요")
+                rows = (ms.get(x.get('src')) or {}).get('series') if x.get('src') in MK_IDS else x.get('hist')
+                last = rows[-1][1] if isinstance(rows, list) and rows and isinstance(rows[-1], list) and len(rows[-1]) == 2 and is_num(rows[-1][1]) else None
+                if is_num(last) and (last < y1['lo'] * 0.999 or last > y1['hi'] * 1.001):
+                    warn(f'{q}.y1', f'마지막 종가 {last}가 1년 범위({y1["lo"]}~{y1["hi"]}) 밖이에요. lo·hi를 그 종가로 고쳐 주세요')
         src = x.get('src')
         if src is not None:
             if src not in MK_IDS: err(f'{q}.src', f'{MK_IDS} 중 하나')
