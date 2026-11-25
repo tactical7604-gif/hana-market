@@ -106,7 +106,21 @@ def clean_key(k):
 
 
 KEY_FSC = clean_key(os.environ.get('DATA_GO_KR_KEY'))
-KEY_DART = clean_key(os.environ.get('DART_API_KEY'))
+
+
+def dart_key(k):
+    """OpenDART 키는 숫자·영어 40자예요. 표 한 줄이나 안내 글이 같이 복사돼도 그 안의 40자 키만 골라 써요.
+    돌려주는 건 (키, 로그에 남길 설명). 키 글자는 어디에도 찍지 않아요."""
+    k = clean_key(k)
+    if not k or re.fullmatch(r'[0-9a-fA-F]{40}', k):
+        return k, ''
+    hits = set(re.findall(r'(?<![0-9A-Za-z])[0-9a-fA-F]{40}(?![0-9A-Za-z])', k))
+    if len(hits) == 1:
+        return hits.pop(), '넣은 값에 다른 글자가 섞여 있어서 그 안의 40자 키만 골라 썼어요'
+    return k, ''
+
+
+KEY_DART, DART_NOTE = dart_key(os.environ.get('DART_API_KEY'))
 CID = (os.environ.get('BRANDFETCH_CLIENT_ID') or '').strip()
 NOW = dt.datetime.now(KST)
 
@@ -496,6 +510,8 @@ def main():
     # 3) DART: 회사 정보(60일마다), 재무(매번), 배당·주주(받을 종목만)
     fins, extra = {}, {}
     if KEY_DART:
+        if DART_NOTE:
+            log('DART_API_KEY:', DART_NOTE)
         try:
             cmap = corp_codes()
             todo = [c for c in sorted(uni, key=lambda c: (c not in keep, -(uni[c]['cap'] or 0)))
@@ -526,7 +542,15 @@ def main():
         except ApiError as e:
             log('DART는 이번에 건너뛰어요:', e)
             # 키 글자는 절대 찍지 않고 모양(길이)만 알려줘요. 다시 넣을 때 맞는 키인지 바로 알 수 있게.
-            shape = '모양은 맞아요(숫자·영어 40자)' if re.fullmatch(r'[0-9a-fA-F]{40}', KEY_DART) else f'{len(KEY_DART)}자라서 OpenDART 키(숫자·영어 40자)와 모양이 달라요'
+            # 다른 키를 잘못 넣었는지도 같다/다르다만 비교해서 알려줘요.
+            if re.fullmatch(r'[0-9a-fA-F]{40}', KEY_DART):
+                shape = '모양은 맞아요(숫자·영어 40자). OpenDART에서 그 키가 정상(사용 중)인지 봐 주세요'
+            elif KEY_FSC and KEY_DART == KEY_FSC:
+                shape = '공공데이터포털 키(DATA_GO_KR_KEY)와 똑같아요. 다트 키는 OpenDART 사이트에서 따로 받는 숫자·영어 40자예요'
+            elif CID and KEY_DART == CID:
+                shape = '브랜드페치 Client ID와 똑같아요. 다트 키는 OpenDART 사이트에서 따로 받는 숫자·영어 40자예요'
+            else:
+                shape = f'{len(KEY_DART)}자이고 안에 40자 키 모양이 없어서 OpenDART 키가 아닌 것 같아요(다트 키는 숫자·영어 40자)'
             log(f'  도움말: 넣은 DART_API_KEY는 {shape}. OpenDART → 인증키 신청/관리 → 오픈API 이용현황의 키를 넣어 주세요.')
     else:
         log('DART_API_KEY가 아직 없어요. 시세와 차트만 만들어요.')

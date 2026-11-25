@@ -237,6 +237,40 @@ def main():
         m3 = load({'DATA_GO_KR_KEY': urllib.parse.quote(FAKE_FSC, safe='')})
         ok('인코딩 키 정리', m3.KEY_FSC == FAKE_FSC)
 
+        # 6-2) DART 키: 표 한 줄처럼 다른 글자와 같이 넣어도 그 안의 40자만 골라 씀(키 글자는 안 찍음)
+        k40 = '0123456789abcdef0123456789abcdef01234567'
+        m5 = load({'DART_API_KEY': f'1\t{k40}\t개인\t2026.11.25 정상'})
+        ok('DART 키: 섞인 글자 속 40자만 골라 씀', m5.KEY_DART == k40 and bool(m5.DART_NOTE))
+        m6 = load({'DART_API_KEY': k40})
+        ok('DART 키: 40자는 그대로', m6.KEY_DART == k40 and not m6.DART_NOTE)
+        m7 = load({'DART_API_KEY': FAKE_DART})
+        ok('DART 키: 40자 모양이 없으면 그대로', m7.KEY_DART == FAKE_DART and not m7.DART_NOTE)
+
+        class K40Fake(Fake):
+            def __call__(self, url, params):
+                if params.get('crtfc_key') == k40:
+                    params = {**params, 'crtfc_key': FAKE_DART}
+                return super().__call__(url, params)
+        tmp5 = tempfile.mkdtemp()
+        shutil.copy(os.path.join(REPO, 'market.json'), tmp5)
+        m5.NOW = dt.datetime(2026, 11, 26, 14, 10, tzinfo=m5.KST)
+        m5.KEY_FSC = FAKE_FSC
+        m5.HTTP = K40Fake(names, last)
+        rc, log = run(m5, tmp5)
+        s5 = json.loads(files(tmp5)['005930.json'])
+        ok('DART 키: 골라 쓴 키로 회사 정보까지 받음', rc == 0 and s5['co'] and '40자 키만 골라 썼어요' in log and k40 not in log, log.strip()[-80:])
+        shutil.rmtree(tmp5)
+
+        # 6-3) 다트 칸에 공공데이터포털 키를 넣으면 그렇다고 알려 줌(키 글자는 안 찍음)
+        tmp6 = tempfile.mkdtemp()
+        shutil.copy(os.path.join(REPO, 'market.json'), tmp6)
+        m8 = load({'DATA_GO_KR_KEY': FAKE_FSC, 'DART_API_KEY': FAKE_FSC})
+        m8.NOW = dt.datetime(2026, 11, 26, 14, 10, tzinfo=m8.KST)
+        m8.HTTP = Fake(names, last)
+        rc, log = run(m8, tmp6)
+        ok('다트 칸에 공공데이터 키: 그렇다고 알려 줌', rc == 0 and '공공데이터포털 키(DATA_GO_KR_KEY)와 똑같아요' in log and FAKE_FSC not in log and 'abc+def' not in log, log.strip()[-120:])
+        shutil.rmtree(tmp6)
+
         # 6-1) 예전에 받은 키(옛 주소에만 등록) → 옛 주소로 넘어가서 받음
         class OldKeyFake(Fake):
             def __call__(self, url, params):
