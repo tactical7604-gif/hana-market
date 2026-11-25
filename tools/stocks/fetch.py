@@ -13,6 +13,7 @@ GitHub 자동 작업(.github/workflows/stocks.yml)이 평일 하루 두 번 실�
 - stocks/<코드>.json     : 일봉(약 1년 반), 회사 개요, 재무 3년, 배당, 주요 주주, 같은 업종 비교
 - stocks/companies.json  : DART 회사 정보 저장(자주 안 바뀌어서 60일마다 새로 받아요)
 """
+import calendar
 import datetime as dt
 import io
 import json
@@ -154,6 +155,12 @@ def norm_code(s):
     return s if re.fullmatch(r'[0-9A-Z]{6}', s) else None
 
 
+# 회사 자기 도메인이 아닌 곳(블로그·SNS·홈페이지 빌더)은 로고를 찾을 수 없어서 비워 둬요. 앱(market.js)의 BAD_HOST와 같은 목록이에요.
+BAD_HOST = re.compile(r'(^|\.)(blog\.naver\.com|cafe\.naver\.com|naver\.me|modoo\.at|tistory\.com|blogspot\.com|wordpress\.com|wixsite\.com'
+                      r'|weebly\.com|facebook\.com|instagram\.com|youtube\.com|pf\.kakao\.com|sites\.google\.com|github\.io|notion\.site'
+                      r'|linkedin\.com|cafe\.daum\.net|blog\.daum\.net|imweb\.me|creatorlink\.net)$')
+
+
 def domain_of(url):
     u = (url or '').strip().lower()
     if not u:
@@ -162,7 +169,16 @@ def domain_of(url):
         u = 'http://' + u
     host = urllib.parse.urlsplit(u).hostname or ''
     host = re.sub(r'^www\d?\.', '', host)
+    if BAD_HOST.search(host):
+        return ''
     return host if re.fullmatch(r'[a-z0-9.-]+\.[a-z]{2,}', host) else ''
+
+
+def add_months(d, n):
+    """달력 기준 n개월 앞뒤 날짜. 그 달에 같은 날이 없으면 말일(앱 market.js의 addM과 같은 계산)."""
+    m = d.month - 1 + n
+    y, m = d.year + m // 12, m % 12 + 1
+    return d.replace(year=y, month=m, day=min(d.day, calendar.monthrange(y, m)[1]))
 
 
 def ind_name(c):
@@ -243,11 +259,11 @@ def snapshot(day):
         if not code or mk not in ('KOSPI', 'KOSDAQ'):
             continue
         out[code] = {'n': (it.get('itmsNm') or '').strip(), 'm': mk, 'c': num(it.get('clpr')), 'cap': num(it.get('mrktTotAmt')),
-                     'sh': num(it.get('lstgStCnt')), 'isin': (it.get('isinCd') or '').strip()}
+                     'sh': num(it.get('lstgStCnt')), 'amt': num(it.get('trPrc')), 'isin': (it.get('isinCd') or '').strip()}
     return out
 
 
-def snapshot_near(day_iso, back=7):
+def snapshot_near(day_iso, back=10):
     d = dt.date.fromisoformat(day_iso)
     for i in range(back):
         s = snapshot((d - dt.timedelta(days=i)).strftime('%Y%m%d'))
@@ -449,10 +465,10 @@ def main():
             rows = [merged[k] for k in sorted(merged) if k >= start]
         hists[c] = (rows, meta, old)
 
-    # 2) 1개월·1년 전 종가 (수익률 비교용)
+    # 2) 1개월·1년 전 종가 (수익률 비교용). 앱 차트의 기간 수익률과 같은 기준: 달력으로 1·12개월 전 날이나 그 앞 마지막 거래일
     d0 = dt.date.fromisoformat(day_iso)
-    s1m = snapshot_near((d0 - dt.timedelta(days=30)).isoformat())
-    s1y = snapshot_near((d0 - dt.timedelta(days=365)).isoformat())
+    s1m = snapshot_near(add_months(d0, -1).isoformat())
+    s1y = snapshot_near(add_months(d0, -12).isoformat())
 
     # 3) DART: 회사 정보(60일마다), 재무(매번), 배당·주주(받을 종목만)
     fins, extra = {}, {}
@@ -493,10 +509,13 @@ def main():
     def peer_row(c):
         s, f = uni.get(c) or snap.get(c) or {}, fins.get(c) or {}
         last = lambda k: (f.get(k) or [None])[-1]
+        prev = lambda k: (f.get(k) or [None, None])[-2] if len(f.get(k) or []) >= 2 else None
         r1m = s.get('c') / s1m[c]['c'] - 1 if c in s1m and s1m[c].get('c') and s.get('c') else None
         r1y = s.get('c') / s1y[c]['c'] - 1 if c in s1y and s1y[c].get('c') and s.get('c') else None
+        # [코드, 이름, 시가총액, 매출, 영업이익, 순이익, 자본, 1개월, 1년, 종가, 전년 매출, 전년 영업이익, 전년 순이익]
         return [c, s.get('n'), s.get('cap'), last('rev'), last('op'), last('ni'), last('eq'),
-                round(r1m, 4) if r1m is not None else None, round(r1y, 4) if r1y is not None else None]
+                round(r1m, 4) if r1m is not None else None, round(r1y, 4) if r1y is not None else None,
+                s.get('c'), prev('rev'), prev('op'), prev('ni')]
 
     changed = 0
     for c in sorted(keep):
@@ -506,7 +525,7 @@ def main():
         s, co, f = snap[c], cos.get(c) or {}, fins.get(c)
         obj = {
             'v': 1, 'code': c, 'name': s['n'], 'mkt': s['m'], 'asof': rows[-1][0],
-            'cap': s.get('cap') or meta.get('cap'), 'shares': s.get('sh') or meta.get('sh'),
+            'cap': s.get('cap') or meta.get('cap'), 'shares': s.get('sh') or meta.get('sh'), 'amt': s.get('amt'),
             'd': rows,
             'co': {k: co.get(k) for k in ('ceo', 'est', 'addr', 'url', 'acc')} | {'ind': ind_name(co.get('indc')), 'indc': co.get('indc')} if co else None,
             'fin': {'fy': f['fy'], 'fs': f['fs'], 'years': [f['fy'] - 2, f['fy'] - 1, f['fy']], **{k: f.get(k) for k in ACC}} if f else None,

@@ -180,7 +180,9 @@ def main():
         ok('사업보고서 없으면 전년도로', sam['fin'] and sam['fin']['fy'] == 2024 and sam['fin']['fs'] == 'CFS' and sam['fin']['rev'][-1] == 3e12, json.dumps(sam['fin'])[:120])
         ok('배당(보통주)·주주(합계·우선주 빼고)', sam['x']['dps'] == 1444 and sam['x']['hold'] == [['큰회사', 8.51], ['대표님', 1.63]], json.dumps(sam['x'], ensure_ascii=False))
         ok('같은 업종 비교: 자기 자신 + 보통주만', sam['peers'][0][0] == '005930' and len(sam['peers']) >= 3 and all(p[0].endswith('0') for p in sam['peers'][1:]) and '005935' not in [p[0] for p in sam['peers']])
-        ok('비교 줄: 1개월·1년 수익률 있음', all(len(p) == 9 for p in sam['peers']) and sam['peers'][0][7] is not None and sam['peers'][0][8] is not None)
+        ok('비교 줄: 1개월·1년 수익률 있음', all(len(p) == 13 for p in sam['peers']) and sam['peers'][0][7] is not None and sam['peers'][0][8] is not None)
+        ok('비교 줄: 종가·전년 실적', sam['peers'][0][9] == sam['d'][-1][4] and sam['peers'][0][10] == 2.7e12 and sam['peers'][1][11] == 2.7e11, json.dumps(sam['peers'][0]))
+        ok('거래대금', sam['amt'] == 999)
         pref = [c for c, v in idx['items'].items() if v[0] == '깨끗한나라우']
         ok('우선주도 이름으로 찾고 파일 생성', pref and (pref[0] + '.json') in F)
         ok('하나금융 도메인은 적어만 둠(앱이 색 배지로)', idx['items']['086790'][2] == 'hanafn.com')
@@ -232,6 +234,14 @@ def main():
         # 6) 인코딩된 키(%2B)도 받아 줌
         m3 = load({'DATA_GO_KR_KEY': urllib.parse.quote(FAKE_FSC, safe='')})
         ok('인코딩 키 정리', m3.KEY_FSC == FAKE_FSC)
+
+        # 7) 도메인 거르기·달력 개월 계산
+        ok('블로그·홈페이지 빌더 주소는 도메인 비움',
+           [m3.domain_of(u) for u in ('https://blog.naver.com/abc', 'abc.modoo.at', 'http://x.tistory.com/1', 'www.navercorp.com', 'http://www.samsung.com/sec')]
+           == ['', '', '', 'navercorp.com', 'samsung.com'])
+        D = dt.date
+        ok('달력 개월 계산(말일 맞춤)', [m3.add_months(D(2026, 3, 31), -1), m3.add_months(D(2026, 11, 25), -12), m3.add_months(D(2028, 2, 29), -12), m3.add_months(D(2026, 1, 15), -1)]
+           == [D(2026, 2, 28), D(2025, 11, 25), D(2027, 2, 28), D(2025, 12, 15)])
     finally:
         shutil.rmtree(tmp)
     print(f'\n{"❌ " + str(fails) + "개 실패" if fails else "✅ 모두 통과"}')
