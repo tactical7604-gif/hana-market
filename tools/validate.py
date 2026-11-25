@@ -458,8 +458,11 @@ else:
 
 # ---------- 매달린 캐릭터 대사 peek (선택, 11/26부터) ----------
 # 앱은 자리마다 대사 3개까지(40자에서 잘라요)와 표정 하나를 써요. 없거나 틀린 자리는 앱이 숫자로 대사를 만들어요.
-PK_IDS = ('hl', 'index', 'movers', 'mover2', 'oneLine', 'card1', 'card2', 'brokers', 'krMood', 'krPoints', 'globalMood', 'flowToday', 'flowMonth')
-PK_MK = ('index', 'movers', 'mover2')
+# 기본 13곳 + 14개 탭 전체로 늘린 자리(11/26). quizRes(퀴즈 결과)는 점수에 맞춰 앱이 만들어서 데이터로 안 써요.
+PK_IDS = ('hl', 'index', 'movers', 'mover2', 'oneLine', 'card1', 'card2', 'brokers', 'krMood', 'krPoints', 'globalMood', 'flowToday', 'flowMonth',
+          'big', 'radar', 'watch', 'cal', 'cty1', 'cty3', 'flowWeek', 'flowStats', 'flowTake', 'chain1', 'chain2', 'chain3', 'fx', 'walletItems', 'loan', 'tips',
+          'back', 'sc1', 'sc2', 'rules', 'words', 'wordMid', 'quiz', 'predict', 'pdQ3', 'pdLast', 'league', 'lgMine', 'lgBody', 'ask', 'ask4')
+PK_MK = ('index', 'movers', 'mover2', 'big')
 PK_MOODS = ('shock', 'dizzy', 'peek', 'cheer', 'sweat', 'tired', 'party', 'puzzled', 'sad', 'angry', 'love', 'cool', 'sly')
 def pk_entry(v, q):
     if not isinstance(v, dict): err(q, '{"t": 대사, "m": 표정} 형식이어야 해요'); return
