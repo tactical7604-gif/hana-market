@@ -309,13 +309,13 @@ else:
         pos = [x.get('a') for x in its if isinstance(x, dict)]
         if len(set(pos)) == 1 and len(pos) >= 3: warn('quiz.items', '정답 위치가 모두 같아요. 섞어 주세요')
 
+TABIDS = ('movers', 'must', 'brokers', 'kr', 'global', 'flows', 'chain', 'wallet', 'whatif', 'words', 'quiz', 'predict', 'league', 'ask')
 ak = d.get('ask')
 if not isinstance(ak, dict): err('ask', '없어요 (물어보면 탭)')
 else:
     s(ak, 'intro', 'ask', req=False, maxlen=90); s(ak, 'note', 'ask', req=False, maxlen=90)
     its = lst(ak, 'items', 'ask', mn=3)
     if len(its) > 7: warn('ask.items', '7개 이하 권장')
-    TABIDS = ('movers', 'must', 'brokers', 'kr', 'global', 'flows', 'chain', 'wallet', 'whatif', 'words', 'quiz', 'ask')
     for i, x in enumerate(its):
         q = f'ask.items[{i}]'
         s(x, 'q', q, maxlen=40); s(x, 'short', q, maxlen=50); strlist(x, 'a', q, mn=1, maxlen=90)
@@ -323,6 +323,124 @@ else:
         if 'tab' in x and x['tab'] not in TABIDS: err(f'{q}.tab', f'탭 id가 아니에요: {x["tab"]}')
         s(x, 'tabLabel', q, req=False, maxlen=20)
     sources(ak, 'sources', 'ask')
+
+# ---------- 이번 주 맞혀봐 · 동료 리그 (11/25 추가) ----------
+PID = re.compile(r'^[a-z0-9-]{1,24}$')
+def iso_t(v):
+    try:
+        t = datetime.datetime.fromisoformat(v)
+        return t if t.tzinfo else None
+    except (TypeError, ValueError): return None
+def monday(v, p):
+    if not (isinstance(v, str) and DATE.match(v)): err(p, 'YYYY-MM-DD 형식이어야 해요'); return None
+    day = datetime.date.fromisoformat(v)
+    if day.weekday() != 0: err(p, f'월요일 날짜여야 해요 ({v})'); return None
+    return day
+up_t = iso_t(up) if up else None
+def predict_items(items, p, wk_day, done_all=False):
+    ids = []
+    for i, x in enumerate(items):
+        q = f'{p}[{i}]'
+        if not isinstance(x, dict): err(q, '객체여야 해요'); continue
+        iid = s(x, 'id', q)
+        if iid is not None:
+            if not PID.match(iid): err(f'{q}.id', '영문 소문자·숫자·- 로 24자 이하')
+            ids.append(iid)
+        s(x, 'icon', q); s(x, 'q', q, maxlen=40); s(x, 'd', q, maxlen=30); s(x, 'why', q, maxlen=90); s(x, 'rule', q, maxlen=40)
+        lk = s(x, 'lock', q); lk_t = iso_t(lk) if lk else None
+        if lk is not None and lk_t is None: err(f'{q}.lock', 'ISO 8601 + 시간대 (예: 2026-11-25T22:30:00+09:00)')
+        if lk_t and wk_day:
+            kd = (lk_t.astimezone(datetime.timezone(datetime.timedelta(hours=9)))).date()
+            if not (wk_day - datetime.timedelta(days=2) <= kd <= wk_day + datetime.timedelta(days=6)): warn(f'{q}.lock', f'{wk_day} 주의 마감 시각이 아닌 것 같아요 ({lk})')
+        o = lst(x, 'opts', q, mn=2)
+        if len(o) > 4: err(f'{q}.opts', '보기는 4개까지예요')
+        strlist(x, 'opts', q, mn=2, maxlen=24)
+        a_, void = x.get('a'), x.get('void', False)
+        if not isinstance(void, bool): err(f'{q}.void', 'true/false'); void = False
+        if a_ is not None:
+            if not (isinstance(a_, int) and not isinstance(a_, bool) and 0 <= a_ < len(o)): err(f'{q}.a', f'정답 번호는 0~{len(o) - 1} 사이 정수이거나 null이에요')
+            if void: err(q, 'a와 void: true를 같이 쓰지 않아요')
+        if a_ is not None or void:
+            s(x, 'res', q, maxlen=140)
+            if lk_t and up_t and up_t < lk_t: err(f'{q}.a', '마감 시각 전인데 결과가 들어 있어요')
+        elif done_all: err(f'{q}.a', 'last로 옮긴 문제는 모두 채점돼 있어야 해요 (a 또는 void: true)')
+        if 'tab' in x and x['tab'] not in TABIDS: err(f'{q}.tab', f'탭 id가 아니에요: {x["tab"]}')
+    if len(set(ids)) != len(ids): err(p, 'id가 겹쳐요')
+    return ids
+pd = d.get('predict')
+if not isinstance(pd, dict): err('predict', '없어요 (이번 주 맞혀봐 탭)')
+else:
+    wk_day = monday(pd.get('wk'), 'predict.wk')
+    s(pd, 'title', 'predict', maxlen=24); s(pd, 'intro', 'predict', req=False, maxlen=90); s(pd, 'note', 'predict', req=False, maxlen=120)
+    its = lst(pd, 'items', 'predict', mn=3)
+    if len(its) > 6: warn('predict.items', '6문제 이하 권장')
+    cur_ids = predict_items(its, 'predict.items', wk_day)
+    if wk_day and up_t:
+        this_mon = up_t.astimezone(datetime.timezone(datetime.timedelta(hours=9))).date()
+        this_mon -= datetime.timedelta(days=this_mon.weekday())
+        if wk_day not in (this_mon, this_mon + datetime.timedelta(days=7)): warn('predict.wk', f'이번 주({this_mon})나 다음 주 문제가 아니에요')
+    pos = [x.get('a') for x in its if isinstance(x, dict) and isinstance(x.get('a'), int)]
+    if len(pos) >= 3 and len(set(pos)) == 1: warn('predict.items', '정답 위치가 모두 같아요. 보기 순서를 섞어 주세요 (이미 낸 문제는 바꾸지 말고 새 문제부터)')
+    la = pd.get('last')
+    if la is not None:
+        if not isinstance(la, dict): err('predict.last', '객체여야 해요')
+        else:
+            last_day = monday(la.get('wk'), 'predict.last.wk')
+            if last_day and wk_day and last_day >= wk_day: err('predict.last.wk', 'predict.wk보다 앞선 주여야 해요')
+            s(la, 'title', 'predict.last', maxlen=24)
+            predict_items(lst(la, 'items', 'predict.last', mn=1), 'predict.last.items', last_day, done_all=True)
+    sources(pd, 'sources', 'predict', req=False)
+
+lg = d.get('league')
+MK_IDS = ('kospi', 'kosdaq', 'nasdaq')
+if not isinstance(lg, dict): err('league', '없어요 (동료 리그 탭)')
+else:
+    s(lg, 'intro', 'league', req=False, maxlen=90); s(lg, 'note', 'league', req=False, maxlen=120)
+    assets = lst(lg, 'assets', 'league', mn=4)
+    if len(assets) > 10: warn('league.assets', '10개 이하 권장')
+    aids = []
+    for i, x in enumerate(assets):
+        q = f'league.assets[{i}]'
+        if not isinstance(x, dict): err(q, '객체여야 해요'); continue
+        aid = s(x, 'id', q)
+        if aid is not None:
+            if not re.match(r'^[a-z0-9]{1,16}$', aid): err(f'{q}.id', '영문 소문자·숫자 16자 이하')
+            aids.append(aid)
+        s(x, 'name', q, maxlen=12); s(x, 'icon', q); s(x, 'kind', q, maxlen=10)
+        mkt = x.get('mkt')
+        if mkt not in ('kr', 'us'): err(f'{q}.mkt', "'kr' 또는 'us'")
+        if x.get('grp') not in ('kr', 'us', 'cmd', 'fx'): err(f'{q}.grp', "'kr'·'us'·'cmd'·'fx' 중 하나")
+        if 'cur' in x and x['cur'] not in ('원', '$'): err(f'{q}.cur', "'원' 또는 '$'")
+        if 'close' in x and not re.match(r'^\d{2}:\d{2}$', str(x['close'])): err(f'{q}.close', '"HH:MM" (한국시간)')
+        src = x.get('src')
+        if src is not None:
+            if src not in MK_IDS: err(f'{q}.src', f'{MK_IDS} 중 하나')
+            if 'hist' in x: err(q, 'src와 hist 중 하나만 써요')
+            elif src in MK_IDS and isinstance(ms.get(src), dict) and len(ms[src].get('series') or []) < 20: warn(f'{q}.src', f'markets.{src}.series가 20개보다 적으면 리그 최근 4주 계산이 짧아져요')
+            continue
+        hist = lst(x, 'hist', q, mn=2); dates = []; prev_v = None
+        for j, row in enumerate(hist):
+            if not (isinstance(row, list) and len(row) == 2 and DATE.match(str(row[0])) and is_num(row[1]) and row[1] > 0): err(f'{q}.hist[{j}]', '["YYYY-MM-DD", 0보다 큰 숫자] 형식이어야 해요'); continue
+            dates.append(row[0])
+            if prev_v and abs(row[1] / prev_v - 1) > 0.3: warn(f'{q}.hist[{j}]', '하루에 30% 넘게 움직였어요. 숫자를 다시 확인해 주세요')
+            prev_v = row[1]
+        if dates != sorted(dates) or len(set(dates)) != len(dates): err(f'{q}.hist', '날짜가 오름차순이고 겹치지 않아야 해요')
+        if len(hist) > 30: warn(f'{q}.hist', f'{len(hist)}개예요. 25개 정도로 줄여 주세요 (오래된 것부터)')
+        am = a.get(mkt) if mkt in ('kr', 'us') else None
+        if dates and isinstance(am, str) and DATE.match(am):
+            if dates[-1] > am: err(f'{q}.hist', f'마지막 날짜 {dates[-1]}가 asof.{mkt}({am})보다 뒤예요')
+            elif dates[-1] < am: warn(f'{q}.hist', f'asof.{mkt}({am}) 종가가 아직 없어요. 그날 종가를 붙여 주세요')
+        ref = x.get('ref')
+        if ref is not None:
+            rk, _, rn = str(ref).partition(':'); rv = None
+            if rk == 'ticker': rv = next((t.get('value') for t in d.get('ticker') or [] if isinstance(t, dict) and t.get('id') == rn), None)
+            elif rk in MK_IDS: rv = next((b.get('price') for b in (ms.get(rk) or {}).get('big') or [] if isinstance(b, dict) and b.get('name') == rn), None)
+            else: err(f'{q}.ref', '"ticker:아이디" 또는 "kospi:종목명"/"nasdaq:종목명" 형식')
+            if rk in MK_IDS + ('ticker',) and not is_num(rv): warn(f'{q}.ref', f'{ref} 가격을 찾지 못했어요 (big에 price를 넣어 주세요)')
+            elif is_num(rv) and dates and dates[-1] == am and hist and is_num(hist[-1][1]) and abs(hist[-1][1] - rv) / rv > 0.0005:
+                err(f'{q}.hist', f'{am} 값 {hist[-1][1]}이 {ref} 가격 {rv}와 달라요')
+    if len(set(aids)) != len(aids): err('league.assets', 'id가 겹쳐요')
+    sources(lg, 'sources', 'league', req=False)
 
 # ---------- 투자 권유처럼 읽히는 말 막기 ----------
 BAN = re.compile(r'(사세요|파세요|매수하세요|매도하세요|추천합니다|추천 종목|꼭 사|지금 사야|담으세요)')
