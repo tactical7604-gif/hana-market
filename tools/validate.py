@@ -456,8 +456,37 @@ else:
     if len(set(aids)) != len(aids): err('league.assets', 'id가 겹쳐요')
     sources(lg, 'sources', 'league', req=False)
 
+# ---------- 매달린 캐릭터 대사 peek (선택, 11/26부터) ----------
+# 앱은 자리마다 대사 3개까지(40자에서 잘라요)와 표정 하나를 써요. 없거나 틀린 자리는 앱이 숫자로 대사를 만들어요.
+PK_IDS = ('hl', 'index', 'movers', 'mover2', 'oneLine', 'card1', 'card2', 'brokers', 'krMood', 'krPoints', 'globalMood', 'flowToday', 'flowMonth')
+PK_MK = ('index', 'movers', 'mover2')
+PK_MOODS = ('shock', 'dizzy', 'peek', 'cheer', 'sweat', 'tired', 'party', 'puzzled', 'sad', 'angry', 'love', 'cool', 'sly')
+def pk_entry(v, q):
+    if not isinstance(v, dict): err(q, '{"t": 대사, "m": 표정} 형식이어야 해요'); return
+    t = v.get('t'); ts = [t] if isinstance(t, str) else t if isinstance(t, list) else None
+    if not ts or not all(isinstance(x, str) and x.strip() for x in ts): err(f'{q}.t', '대사 문자열(또는 3개까지 목록)이 필요해요')
+    else:
+        if len(ts) > 3: warn(f'{q}.t', f'{len(ts)}개예요. 앱은 3개까지만 써요')
+        for j, x in enumerate(ts):
+            if TAG.search(x): err(f'{q}.t[{j}]', 'HTML 태그는 쓰지 않아요')
+            elif len(x) > 40: warn(f'{q}.t[{j}]', f'{len(x)}자예요. 말풍선은 40자에서 잘려요(20자 안팎 권장)')
+    if v.get('m') not in PK_MOODS: err(f'{q}.m', '표정은 ' + '·'.join(PK_MOODS) + ' 중 하나')
+pk = d.get('peek')
+if pk is not None:
+    if not isinstance(pk, dict): err('peek', '객체여야 해요')
+    else:
+        for k, v in pk.items():
+            q = f'peek.{k}'
+            if k not in PK_IDS: warn(q, '앱이 모르는 자리예요(무시돼요)'); continue
+            if k in PK_MK:
+                if not isinstance(v, dict): err(q, '시장별 객체 {"kospi": {...}, "kosdaq": {...}, "nasdaq": {...}}여야 해요'); continue
+                for mk, e in v.items():
+                    if mk not in MK_IDS: warn(f'{q}.{mk}', 'kospi·kosdaq·nasdaq만 써요'); continue
+                    pk_entry(e, f'{q}.{mk}')
+            else: pk_entry(v, q)
+
 # ---------- 투자 권유처럼 읽히는 말 막기 ----------
-BAN = re.compile(r'(사세요|파세요|매수하세요|매도하세요|추천합니다|추천 종목|꼭 사|지금 사야|담으세요)')
+BAN = re.compile(r'(사세요|파세요|매수하세요|매도하세요|추천합니다|추천 종목|꼭 사|지금 사야|담으세요|가즈아)')
 def walk(x, p):
     if isinstance(x, str):
         m = BAN.search(x)
