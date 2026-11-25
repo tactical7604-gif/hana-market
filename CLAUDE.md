@@ -57,3 +57,9 @@
    - HTML 태그를 쓰지 않아요. 하나금융 로고나 브랜드 문구는 쓰지 않아요(하나증권 항목의 '우리 그룹' 태그만 유지).
 5. **검사**: `python3 tools/validate.py market.json` → 오류 0개.
 6. **올리기**: 데이터 전용 저장소라 PR 없이 `main`에 바로 커밋하고 푸시하는 게 정해진 방식이에요. 커밋 메시지 예: `data: 11/25 마감 반영 (코스피 11/25, 미국 11/24)`.
+
+## stocks/ 폴더 (자동, 고치지 않아요)
+- `stocks/`는 GitHub 자동 작업 `.github/workflows/stocks.yml`이 평일 08:30·14:10(한국시간)에 공식 API(공공데이터포털 주식시세, 금융감독원 OpenDART)로 만들어요. 종목 상세 화면(차트·회사 정보·경쟁사 비교·로고)이 읽어요. 매일 갱신 작업은 이 폴더를 건드리지 않아요.
+- 받을 종목은 `market.json`에 나온 한국 종목(급등락·대형주·수급 상위·리그) + 시가총액 상위(코스피 30·코스닥 10)예요. 이름은 종목 약칭 그대로 써야 찾을 수 있어요(예: 삼성전자우, 깨끗한나라우).
+- 키는 저장소 Secrets(`DATA_GO_KR_KEY`, `DART_API_KEY`)와 Variables(`BRANDFETCH_CLIENT_ID`)에만 있어요. 코드·데이터·커밋 메시지·로그에 키를 쓰지 않아요.
+- 스크립트 `tools/stocks/fetch.py`, 검사 `python3 tools/stocks/test_fetch.py`(가짜 응답이라 인터넷·키 없이 돌아가요).

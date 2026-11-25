@@ -1,0 +1,42 @@
+# 종목 상세 화면(차트·회사 정보·경쟁사 비교·로고)용 공식 데이터를 받아 stocks/ 폴더에 올려요.
+# 키는 저장소 Settings → Secrets and variables → Actions 에 넣어요(코드에 쓰지 않아요).
+#   Secrets: DATA_GO_KR_KEY(공공데이터포털), DART_API_KEY(OpenDART) / Variables: BRANDFETCH_CLIENT_ID
+# 키가 없으면 아무것도 바꾸지 않고 끝나요.
+name: 종목 데이터 받기
+on:
+  schedule:
+    - cron: '30 23 * * 0-4'   # 평일 08:30 KST: 아침 브리핑에 새로 나온 종목 파일을 미리 만들어요
+    - cron: '10 5 * * 1-5'    # 평일 14:10 KST: 전날 종가가 공공데이터포털에 올라온 뒤(13시 이후)
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: stocks
+  cancel-in-progress: false
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - name: 받기 스크립트 검사 (가짜 응답, 1초)
+        run: python3 tools/stocks/test_fetch.py
+      - name: 공식 데이터 받기
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          BRANDFETCH_CLIENT_ID: ${{ vars.BRANDFETCH_CLIENT_ID }}
+        run: python3 --version && python3 tools/stocks/fetch.py
+      - name: 바뀐 게 있으면 올리기
+        run: |
+          mkdir -p stocks
+          git add -A stocks
+          if git diff --cached --quiet; then echo "바뀐 파일이 없어요"; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -q -m "data: 종목 시세·회사 정보 갱신 ($(TZ=Asia/Seoul date '+%m/%d %H:%M'))"
+          for i in 1 2 3; do
+            git pull -q --rebase origin main && git push -q origin HEAD:main && exit 0
+            sleep $((i * 10))
+          done
+          exit 1
