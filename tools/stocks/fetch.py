@@ -29,7 +29,11 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, 'stocks')
 KST = dt.timezone(dt.timedelta(hours=9))
-FSC = 'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo'
+# 새로 신청한 키는 V2 주소에만 등록돼요(옛 주소로 부르면 '30 등록되지 않은 서비스키'). 예전에 받은 키를 위해 옛 주소도 차례로 시도해요.
+FSC_URLS = [
+    'https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2',
+    'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo',
+]
 DART = 'https://opendart.fss.or.kr/api/'
 HIST_DAYS = 550          # 약 1년 반 (1년 차트에 120일선까지 그리려고)
 TOP_KOSPI, TOP_KOSDAQ = 30, 10
@@ -38,7 +42,7 @@ KEEP_DAYS = 30           # 목록에서 빠진 종목 파일을 지우기까지 
 CO_REFRESH_DAYS, CO_MAX_PER_RUN = 60, 200
 SLEEP = 0.12
 SOURCES = [
-    ['금융위원회_주식시세정보 (공공데이터포털)', 'https://www.data.go.kr/'],
+    ['금융위원회_주식시세정보 (공공데이터포털)', 'https://www.data.go.kr/data/15094808/openapi.do'],
     ['금융감독원 전자공시 OpenDART', 'https://opendart.fss.or.kr/'],
 ]
 # 한국표준산업분류(10차) 업종 이름: 3자리가 있으면 3자리, 없으면 2자리
@@ -210,9 +214,11 @@ def jsave(path, obj):
 
 
 # ---------- 금융위원회 주식시세정보 ----------
-def fsc(params):
-    CALLS['fsc'] += 1
-    raw = fetch(FSC, {'serviceKey': KEY_FSC, 'resultType': 'json', **params})
+FSC_OK = {'url': None}  # 한 번 통한 주소는 이번 실행 내내 써요
+
+
+def fsc_once(url, params):
+    raw = fetch(url, {'serviceKey': KEY_FSC, 'resultType': 'json', **params})
     time.sleep(SLEEP)
     try:
         j = json.loads(raw.decode('utf-8'))
@@ -229,6 +235,23 @@ def fsc(params):
     if isinstance(items, dict):
         items = [items]
     return items, int(num(body.get('totalCount')) or 0)
+
+
+def fsc(params):
+    CALLS['fsc'] += 1
+    if FSC_OK['url']:
+        return fsc_once(FSC_OK['url'], params)
+    errs = []
+    for url in FSC_URLS:
+        try:
+            out = fsc_once(url, params)
+        except ApiError as e:
+            errs.append(str(e))
+            continue
+        FSC_OK['url'] = url
+        log('시세 주소: ' + ('새 주소(V2)' if '_V2' in url else '옛 주소'))
+        return out
+    raise ApiError(' / '.join(dict.fromkeys(errs)))
 
 
 def fsc_all(params, per=1000, cap=40):

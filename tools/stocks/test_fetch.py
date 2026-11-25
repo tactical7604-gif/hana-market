@@ -171,6 +171,8 @@ def main():
         F = files(tmp)
         ok('첫 실행 성공', rc == 0, log.strip().splitlines()[-1] if log.strip() else '')
         ok('로그에 키가 안 찍힘', FAKE_FSC not in log and FAKE_DART not in log and 'abc+def' not in log)
+        fsc_urls = {c[0] for c in fake.calls if 'apis.data.go.kr' in c[0]}
+        ok('시세는 새 주소(V2)로 받음', fsc_urls == {m.FSC_URLS[0]} and '_V2/getStockPriceInfo_V2' in m.FSC_URLS[0] and '새 주소(V2)' in log, str(fsc_urls))
         idx = json.loads(F['index.json'])
         ok('index: 기준일·Client ID·출처', idx['asof'] == '2026-11-25' and idx['cid'] == 'idPublic123' and len(idx['src']) == 2)
         sam = json.loads(F['005930.json'])
@@ -234,6 +236,25 @@ def main():
         # 6) 인코딩된 키(%2B)도 받아 줌
         m3 = load({'DATA_GO_KR_KEY': urllib.parse.quote(FAKE_FSC, safe='')})
         ok('인코딩 키 정리', m3.KEY_FSC == FAKE_FSC)
+
+        # 6-1) 예전에 받은 키(옛 주소에만 등록) → 옛 주소로 넘어가서 받음
+        class OldKeyFake(Fake):
+            def __call__(self, url, params):
+                if '_V2' in url:
+                    self.calls.append((url, dict(params)))
+                    return b'<OpenAPI_ServiceResponse><cmmMsgHeader><errMsg>SERVICE ERROR</errMsg><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg><returnReasonCode>30</returnReasonCode></cmmMsgHeader></OpenAPI_ServiceResponse>'
+                return super().__call__(url, params)
+        tmp4 = tempfile.mkdtemp()
+        shutil.copy(os.path.join(REPO, 'market.json'), tmp4)
+        m4 = load({'DATA_GO_KR_KEY': FAKE_FSC, 'DART_API_KEY': FAKE_DART})
+        m4.NOW = dt.datetime(2026, 11, 26, 14, 10, tzinfo=m4.KST)
+        f4 = OldKeyFake(names, last)
+        m4.HTTP = f4
+        rc, log = run(m4, tmp4)
+        v2n = len([c for c in f4.calls if '_V2' in c[0]])
+        ok('옛 키: 옛 주소로 넘어가서 성공', rc == 0 and '005930.json' in files(tmp4) and '옛 주소' in log, log.strip().splitlines()[-1] if log.strip() else '')
+        ok('옛 키: 새 주소는 처음 한 번만 시도', v2n == 1, f'{v2n}번')
+        shutil.rmtree(tmp4)
 
         # 7) 도메인 거르기·달력 개월 계산
         ok('블로그·홈페이지 빌더 주소는 도메인 비움',
