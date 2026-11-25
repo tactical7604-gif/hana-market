@@ -525,6 +525,9 @@ def main():
             fins = {c: fins[corp_of(c, cmap)] for c in uni if corp_of(c, cmap) in fins}
         except ApiError as e:
             log('DART는 이번에 건너뛰어요:', e)
+            # 키 글자는 절대 찍지 않고 모양(길이)만 알려줘요. 다시 넣을 때 맞는 키인지 바로 알 수 있게.
+            shape = '모양은 맞아요(숫자·영어 40자)' if re.fullmatch(r'[0-9a-fA-F]{40}', KEY_DART) else f'{len(KEY_DART)}자라서 OpenDART 키(숫자·영어 40자)와 모양이 달라요'
+            log(f'  도움말: 넣은 DART_API_KEY는 {shape}. OpenDART → 인증키 신청/관리 → 오픈API 이용현황의 키를 넣어 주세요.')
     else:
         log('DART_API_KEY가 아직 없어요. 시세와 차트만 만들어요.')
 
