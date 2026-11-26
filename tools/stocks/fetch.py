@@ -12,6 +12,11 @@ GitHub 자동 작업(.github/workflows/stocks.yml)이 평일 하루 두 번 실�
 - stocks/index.json      : 종목 목록(이름·시장·도메인·ISIN), 기준일, 출처, 로고 Client ID
 - stocks/<코드>.json     : 일봉(약 1년 반), 회사 개요, 재무 3년, 배당, 주요 주주, 같은 업종 비교
 - stocks/companies.json  : DART 회사 정보 저장(자주 안 바뀌어서 60일마다 새로 받아요)
+- stocks/all.json        : 코스피·코스닥 전 종목 종가·등락률·시가총액·큰 업종 (시장 지도·내 종목 찾기)
+- stocks/dart.json       : 최근 3일 눈여겨볼 공시(주요사항·거래소 공시) 목록 (오늘의 공시 탭)
+
+python3 tools/stocks/fetch.py             전부 (평일 아침·오후)
+python3 tools/stocks/fetch.py --dart-only 공시 목록만 (평일 저녁, 장 끝나고 나온 공시까지)
 """
 import calendar
 import datetime as dt
@@ -42,6 +47,8 @@ KEEP_DAYS = 30           # 목록에서 빠진 종목 파일을 지우기까지 
 CO_REFRESH_DAYS, CO_MAX_PER_RUN = 60, 200
 LG_DAYS = 40             # league.json에 넣는 최근 종가 개수 (최근 4주 순위 + 여유)
 CAPS_TOP = 250           # caps.json에 넣는 시가총액 상위 종목 수
+MAP_KOSPI, MAP_KOSDAQ = 50, 30   # 시장 지도에 그리는 종목 수(업종 이름을 알려고 이 종목들은 회사 정보도 받아요)
+DART_DAYS, DART_MAX, DART_PAGES = 3, 900, 50   # dart.json: 최근 공시 날짜 수, 최대 건수, 공시 종류마다 최대 페이지
 SLEEP = 0.12
 SOURCES = [
     ['금융위원회_주식시세정보 (공공데이터포털)', 'https://www.data.go.kr/data/15094808/openapi.do'],
@@ -85,6 +92,37 @@ KSIC2 = {
     '71': '전문 서비스', '72': '엔지니어링·과학기술', '73': '기타 전문 서비스', '74': '시설 관리', '75': '사업 지원 서비스', '76': '임대',
     '85': '교육', '86': '보건', '87': '사회복지', '90': '예술·여가', '91': '스포츠·오락', '94': '협회·단체', '95': '수리', '96': '기타 개인 서비스',
 }
+# 시장 지도용 큰 업종. 한국표준산업분류 코드 앞자리(긴 것부터)로 정하고, 0은 '기타'(모름 포함)예요. 앱은 이름 목록(secs)을 같이 받아요.
+MAP_SECS = ['기타', '반도체·전자', '2차전지', '자동차', '조선·방산·기계', '바이오·헬스', '금융', '인터넷·게임', '엔터·미디어',
+            '화학·에너지', '철강·소재', '전력·인프라', '건설', '소비재·유통', '운송', '통신', '지주회사']
+MAP_KSIC = {
+    '2042': 13, '2927': 1, '7011': 5, '282': 2, '221': 3, '252': 4, '271': 5, '713': 8, '715': 16,
+    '26': 1, '27': 1, '30': 3, '25': 4, '29': 4, '31': 4, '34': 4, '21': 5, '86': 5, '64': 6, '65': 6, '66': 6,
+    '58': 7, '62': 7, '63': 7, '59': 8, '60': 8, '90': 8, '91': 8, '19': 9, '20': 9, '22': 9,
+    '16': 10, '17': 10, '23': 10, '24': 10, '28': 11, '35': 11, '36': 11, '41': 12, '42': 12, '68': 12, '72': 12,
+    '10': 13, '11': 13, '12': 13, '13': 13, '14': 13, '15': 13, '18': 13, '32': 13, '33': 13, '45': 13, '46': 13, '47': 13,
+    '55': 13, '56': 13, '75': 13, '76': 13, '85': 13, '95': 13, '96': 13, '49': 14, '50': 14, '51': 14, '52': 14, '61': 15,
+}
+# 분류 코드만으로는 어색한 회사(중간지주·업종 코드가 다른 회사)
+MAP_FIX = {'086520': 2, '009540': 4, '443060': 4, '272210': 4, '0126Z0': 5, '028260': 16}
+# 공시 분류: 제목에 이 말이 있으면 그 분류(위에서부터). 어디에도 안 맞는 공시는 넣지 않아요.
+DART_CATS = (
+    ('warn', '시장 경고', ('투자주의', '투자경고', '투자위험', '매매거래정지', '거래정지', '관리종목', '불성실공시', '상장폐지', '단기과열', '상장적격성')),
+    ('earn', '실적', ('영업(잠정)실적', '잠정실적', '매출액또는손익구조', '손익구조')),
+    ('deal', '계약', ('단일판매', '공급계약')),
+    ('div', '배당', ('배당',)),
+    ('buyback', '자사주', ('자기주식', '주식소각')),
+    ('cap', '증자·감자', ('유상증자', '무상증자', '감자')),
+    ('bond', '사채', ('전환사채', '신주인수권부사채', '교환사채')),
+    ('mna', '합병·분할', ('합병', '분할', '영업양수', '영업양도', '주식교환', '주식이전')),
+    ('owner', '최대주주', ('최대주주',)),
+    ('ask', '조회공시', ('조회공시', '풍문', '해명')),
+    ('invest', '투자', ('신규시설투자', '타법인주식', '유형자산양수', '유형자산취득')),
+    ('mgmt', '주요 경영', ('투자판단관련주요경영사항',)),
+    ('law', '소송', ('소송',)),
+)
+DART_SRC = ['금융감독원 전자공시 OpenDART', 'https://opendart.fss.or.kr/']
+
 ACC = {
     'rev': ('매출액', '수익(매출액)', '영업수익', '매출'),
     'op': ('영업이익', '영업이익(손실)'),
@@ -298,7 +336,7 @@ def snapshot(day):
         if not code or mk not in ('KOSPI', 'KOSDAQ'):
             continue
         out[code] = {'n': (it.get('itmsNm') or '').strip(), 'm': mk, 'c': num(it.get('clpr')), 'cap': num(it.get('mrktTotAmt')),
-                     'sh': num(it.get('lstgStCnt')), 'amt': num(it.get('trPrc')), 'isin': (it.get('isinCd') or '').strip()}
+                     'sh': num(it.get('lstgStCnt')), 'amt': num(it.get('trPrc')), 'isin': (it.get('isinCd') or '').strip(), 'r': num(it.get('fltRt'))}
     return out
 
 
@@ -415,6 +453,65 @@ def holders(cc, year):
     return sorted(([k, v] for k, v in rows.items()), key=lambda x: -x[1])[:6]
 
 
+def dart_cat(title):
+    """공시 제목 → 분류 id. [기재정정] 같은 머리말은 빼고 봐요."""
+    core = re.sub(r'^(\[[^\]]*\]\s*)+', '', title)
+    for cid, _, words in DART_CATS:
+        if any(w in core for w in words):
+            return cid
+    return None
+
+
+def disclosures(caps):
+    """최근 공시(주요사항보고 B · 거래소 공시 I) 중 코스피·코스닥 회사의 눈여겨볼 공시만, 최근 3일치.
+    한 줄: [접수번호(14자리, 앞 8자리가 날짜), 종목코드, 회사 이름, 시장(0 코스피·1 코스닥), 제목, 분류 id, 시가총액(억 원) 또는 null]"""
+    end = NOW.date()
+    bgn = end - dt.timedelta(days=6)
+    rows = {}
+    for ty in ('B', 'I'):
+        page, total = 1, 1
+        while page <= min(total, DART_PAGES):
+            j = dart('list.json', {'bgn_de': bgn.strftime('%Y%m%d'), 'end_de': end.strftime('%Y%m%d'), 'pblntf_ty': ty,
+                                   'page_no': page, 'page_count': 100})
+            if not j:
+                break
+            total = int(num(j.get('total_page')) or 1)
+            for r in j.get('list') or []:
+                cls, code, no = r.get('corp_cls'), norm_code(r.get('stock_code')), str(r.get('rcept_no') or '').strip()
+                if cls not in ('Y', 'K') or not code or not re.fullmatch(r'\d{14}', no):
+                    continue
+                title = re.sub(r'\s+', ' ', str(r.get('report_nm') or '')).strip()
+                cat = dart_cat(title)
+                if cat:
+                    rows[no] = [no, code, (r.get('corp_name') or '').strip(), 0 if cls == 'Y' else 1, title, cat, caps.get(code)]
+            page += 1
+    days = sorted({no[:8] for no in rows}, reverse=True)[:DART_DAYS]
+    return sorted((v for v in rows.values() if v[0][:8] in days), key=lambda v: v[0], reverse=True)[:DART_MAX]
+
+
+def save_dart(rows):
+    """dart.json 쓰기. 내용이 그대로면 시각도 안 바꿔요(쓸데없는 커밋 방지)."""
+    path = os.path.join(OUT, 'dart.json')
+    old = jload(path, {})
+    body = {'asof': ymd(rows[0][0][:8]) if rows else None, 'cats': [[c, n] for c, n, _ in DART_CATS], 'items': rows, 'src': [DART_SRC]}
+    if body == {k: old.get(k) for k in body}:
+        return 0
+    return int(jsave(path, {'v': 1, 'updated': NOW.strftime('%Y-%m-%dT%H:%M:00+09:00'), **body}))
+
+
+def map_sec(code, name, indc):
+    """시장 지도 큰 업종 번호(MAP_SECS). 금융지주가 아닌 지주회사(SK·LG 등)는 '지주회사'로 따로 모아요."""
+    if code in MAP_FIX:
+        return MAP_FIX[code]
+    ic = str(indc or '').strip()
+    if ic.startswith('649'):
+        return 6 if re.search(r'금융|지주|은행', name or '') else 16
+    for k in (4, 3, 2):
+        if len(ic) >= k and ic[:k] in MAP_KSIC:
+            return MAP_KSIC[ic[:k]]
+    return 0
+
+
 # ---------- 어떤 종목을 받을지 ----------
 def wanted_names():
     """market.json에 나온 한국 종목 이름 (급등락·대형주·수급 상위·리그)."""
@@ -519,7 +616,8 @@ def main():
         seen[c] = day_iso
     keep = {c for c, d in seen.items() if c in snap and (dt.date.fromisoformat(day_iso) - dt.date.fromisoformat(d)).days <= KEEP_DAYS}
     seen = {c: seen[c] for c in sorted(keep)}
-    uni = {c: snap[c] for c in (set(sorted(snap, key=lambda c: -(snap[c]['cap'] or 0))[:UNIVERSE]) | keep)}
+    map_codes = set(kospi[:MAP_KOSPI] + kosdaq[:MAP_KOSDAQ])
+    uni = {c: snap[c] for c in (set(sorted(snap, key=lambda c: -(snap[c]['cap'] or 0))[:UNIVERSE]) | keep | map_codes)}
     log(f'받을 종목 {len(keep)}개 · 비교용 {len(uni)}개')
 
     # 1) 일봉: 파일에 있는 다음 날부터만 새로 받아요
@@ -647,13 +745,40 @@ def main():
     # 시가총액 상위 목록 (업종별 탑 5를 다시 고를 때 써요)
     top = sorted(snap, key=lambda c: -(snap[c]['cap'] or 0))[:CAPS_TOP]
     changed += jsave(os.path.join(OUT, 'caps.json'), {'v': 1, 'asof': day_iso, 'items': [[c, snap[c]['n'], snap[c]['m'], snap[c]['cap'], (cos.get(c) or {}).get('indc') or ''] for c in top]})
+
+    # 전 종목 목록 (시장 지도·내 종목 찾기): [코드, 이름, 시장(0 코스피·1 코스닥), 종가, 등락률(%), 시가총액(억 원), 큰 업종 번호]
+    rows = [[c, snap[c]['n'], 0 if snap[c]['m'] == 'KOSPI' else 1, snap[c]['c'], snap[c].get('r') or 0, round((snap[c]['cap'] or 0) / 1e8),
+             map_sec(c, snap[c]['n'], (cos.get(c) or {}).get('indc'))]
+            for c in sorted(snap, key=lambda c: (-(snap[c]['cap'] or 0), c)) if snap[c].get('c')]
+    changed += jsave(os.path.join(OUT, 'all.json'), {'v': 1, 'asof': day_iso, 'secs': MAP_SECS, 'items': rows, 'src': SOURCES})
+
+    # 최근 공시 (오늘의 공시 탭). 저녁에는 --dart-only로 이것만 다시 받아요.
+    if KEY_DART:
+        try:
+            changed += save_dart(disclosures({r[0]: r[5] for r in rows}))
+        except ApiError as e:
+            log('공시 목록은 이번에 건너뛰어요:', e)
     log(f"끝: 바뀐 파일 {changed}개 · API 호출 금융위 {CALLS['fsc']}번 · DART {CALLS['dart']}번")
+    return 0
+
+
+def main_dart():
+    """공시 목록만 다시 받아요(평일 저녁). 시가총액은 아침·오후에 만든 all.json에서 가져와요."""
+    CALLS.update(fsc=0, dart=0)
+    if not KEY_DART:
+        log('DART_API_KEY가 아직 없어요. 공시 목록은 건너뛰어요.')
+        return 0
+    allj = jload(os.path.join(OUT, 'all.json'), {})
+    caps = {r[0]: r[5] for r in allj.get('items') or [] if isinstance(r, list) and len(r) >= 6}
+    rows = disclosures(caps)
+    changed = save_dart(rows)
+    log(f"끝: 공시 {len(rows)}건 · 바뀐 파일 {changed}개 · DART {CALLS['dart']}번")
     return 0
 
 
 if __name__ == '__main__':
     try:
-        sys.exit(main())
+        sys.exit(main_dart() if '--dart-only' in sys.argv[1:] else main())
     except ApiError as e:
         log('실패:', e)
         sys.exit(1)

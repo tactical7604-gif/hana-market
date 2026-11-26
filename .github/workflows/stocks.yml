@@ -7,7 +7,13 @@ on:
   schedule:
     - cron: '30 23 * * 0-4'   # 평일 08:30 KST: 아침 브리핑에 새로 나온 종목 파일을 미리 만들어요
     - cron: '10 5 * * 1-5'    # 평일 14:10 KST: 전날 종가가 공공데이터포털에 올라온 뒤(13시 이후)
+    - cron: '40 9 * * 1-5'    # 평일 18:40 KST: 공시 목록만(장 끝나고 나온 실적·계약 공시까지)
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'all = 전부, dart = 공시 목록만'
+        required: false
+        default: all
 permissions:
   contents: write
 concurrency:
@@ -26,7 +32,15 @@ jobs:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           BRANDFETCH_CLIENT_ID: ${{ vars.BRANDFETCH_CLIENT_ID }}
-        run: python3 --version && python3 tools/stocks/fetch.py
+          SCHEDULE: ${{ github.event.schedule }}
+          MODE: ${{ github.event.inputs.mode }}
+        run: |
+          python3 --version
+          if [ "$SCHEDULE" = "40 9 * * 1-5" ] || [ "$MODE" = "dart" ]; then
+            python3 tools/stocks/fetch.py --dart-only
+          else
+            python3 tools/stocks/fetch.py
+          fi
       - name: 바뀐 게 있으면 올리기
         run: |
           mkdir -p stocks

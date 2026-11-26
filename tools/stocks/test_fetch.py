@@ -46,7 +46,7 @@ class Fake:
         self.last = last_day
         self.days = [d for d in (last_day - dt.timedelta(days=i) for i in range(800)) if d.weekday() < 5][::-1]
         base = [('005930', '삼성전자', 'KOSPI', '264', 'www.samsung.com/sec'), ('000660', 'SK하이닉스', 'KOSPI', '261', 'www.skhynix.com'),
-                ('005935', '삼성전자우', 'KOSPI', '264', ''), ('086790', '하나금융지주', 'KOSPI', '649', 'www.hanafn.com')]
+                ('005935', '삼성전자우', 'KOSPI', '264', ''), ('086790', '하나금융지주', 'KOSPI', '649', 'www.hanafn.com'), ('034730', 'SK', 'KOSPI', '649', 'www.sk.com')]
         self.stocks = {c: {'n': n, 'm': m, 'ind': i, 'url': u} for c, n, m, i, u in base}
         used = {s['n'] for s in self.stocks.values()}
         k = 1000
@@ -58,6 +58,40 @@ class Fake:
             self.stocks[c] = {'n': f'가짜종목{i}', 'm': 'KOSPI' if i % 3 else 'KOSDAQ', 'ind': ['261', '264', '301', '212', '649'][i % 5], 'url': f'https://fake{i}.com/ko'}
         self.fail_dart = False
         self.calls = []
+        self.today = last_day + dt.timedelta(days=1)   # 공시는 오늘(기준일 다음 날)까지 나와요
+        self.filings = self.make_filings()
+
+    # 가짜 공시: 평일마다 거래소 공시(I) 130건 + 주요사항보고(B) 12건. _cat은 검사용 정답(진짜 응답엔 없음)
+    TPL = {'I': [('단일판매ㆍ공급계약체결', 'deal'), ('[기재정정]단일판매ㆍ공급계약체결', 'deal'), ('연결재무제표기준영업(잠정)실적(공정공시)', 'earn'),
+                 ('현금ㆍ현물배당결정', 'div'), ('기업설명회(IR)개최', None), ('조회공시요구(현저한시황변동)', 'ask'), ('투자주의종목지정', 'warn'),
+                 ('주권매매거래정지', 'warn'), ('최대주주변경', 'owner'), ('투자판단관련주요경영사항', 'mgmt'), ('소송등의제기ㆍ신청(일정금액이상의청구)', 'law'),
+                 ('특허권취득', None), ('매출액또는손익구조30%(대규모법인은15%)이상변경', 'earn')],
+           'B': [('주요사항보고서(유상증자결정)', 'cap'), ('주요사항보고서(자기주식취득결정)', 'buyback'), ('주요사항보고서(전환사채권발행결정)', 'bond'),
+                 ('주요사항보고서(회사합병결정)', 'mna'), ('주요사항보고서(무상증자결정)', 'cap'), ('주요사항보고서(타법인주식및출자증권취득결정)', 'invest')]}
+
+    def make_filings(self):
+        codes = sorted(self.stocks, key=lambda c: (c not in ('005930', '000660', '086790'), c))
+        out = {'I': [], 'B': []}
+        d = self.today - dt.timedelta(days=12)
+        while d <= self.today:
+            if d.weekday() < 5:
+                for ty, n in (('I', 130), ('B', 12)):
+                    for i in range(n):
+                        c = codes[(i * 7 + d.day) % len(codes)]
+                        title, cat = self.TPL[ty][i % len(self.TPL[ty])]
+                        cls = 'Y' if self.stocks[c]['m'] == 'KOSPI' else 'K'
+                        sc = c
+                        if i % 11 == 5:
+                            cls = 'N'      # 코넥스
+                        elif i % 13 == 6:
+                            cls, sc = 'E', ''   # 비상장(종목코드 없음)
+                        out[ty].append({'corp_code': f'00{c}', 'corp_name': self.stocks[c]['n'], 'stock_code': sc, 'corp_cls': cls, 'report_nm': title,
+                                        'rcept_no': f"{d:%Y%m%d}{(8 if ty == 'I' else 9)}{i:05d}", 'flr_nm': self.stocks[c]['n'], 'rcept_dt': f'{d:%Y%m%d}', 'rm': '',
+                                        '_cat': cat if cls in ('Y', 'K') and sc else None})
+            d += dt.timedelta(days=1)
+        for ty in out:
+            out[ty].sort(key=lambda r: r['rcept_no'], reverse=True)
+        return out
 
     def px(self, c, d):
         seed = sum(map(ord, c))
@@ -65,10 +99,15 @@ class Fake:
         base = 1000 + seed * 37 % 90000
         return round(base * (1 + 0.3 * ((i * (seed % 7 + 1)) % 50) / 50))
 
+    def rate(self, c, d):
+        i = self.days.index(d)
+        prev = self.px(c, self.days[i - 1]) if i else self.px(c, d)
+        return round((self.px(c, d) / prev - 1) * 100, 2)
+
     def item(self, c, d):
         s, p = self.stocks[c], self.px(c, d)
         return {'basDt': d.strftime('%Y%m%d'), 'srtnCd': c, 'isinCd': f'KR7{c}00{c[-1]}', 'itmsNm': s['n'], 'mrktCtg': s['m'],
-                'clpr': str(p), 'vs': '0', 'fltRt': '0', 'mkp': str(p - 5), 'hipr': str(p + 20), 'lopr': str(p - 30),
+                'clpr': str(p), 'vs': '0', 'fltRt': f'{self.rate(c, d):.2f}', 'mkp': str(p - 5), 'hipr': str(p + 20), 'lopr': str(p - 30),
                 'trqu': '12345', 'trPrc': '999', 'lstgStCnt': '1000000', 'mrktTotAmt': str(p * (1000000 + sum(map(ord, c)) * 999))}
 
     def __call__(self, url, params):
@@ -102,6 +141,14 @@ class Fake:
                 with zipfile.ZipFile(bio, 'w') as z:
                     z.writestr('CORPCODE.xml', xml)
                 return bio.getvalue()
+            if ep == 'list.json':
+                b, e = (dt.datetime.strptime(params[k], '%Y%m%d').date() for k in ('bgn_de', 'end_de'))
+                rows = [r for r in self.filings[params['pblntf_ty']] if b <= dt.datetime.strptime(r['rcept_dt'], '%Y%m%d').date() <= e]
+                n, p = int(params['page_count']), int(params['page_no'])
+                if not rows:
+                    return json.dumps({'status': '013', 'message': '조회된 데이타가 없습니다.'}).encode()
+                return json.dumps({'status': '000', 'message': '정상', 'page_no': p, 'page_count': n, 'total_count': len(rows),
+                                   'total_page': (len(rows) + n - 1) // n, 'list': rows[(p - 1) * n:p * n]}, ensure_ascii=False).encode()
             rev = {v: c for c, v in cmap.items()}
             if ep == 'company.json':
                 c = rev[params['corp_code']]
@@ -132,12 +179,12 @@ class Fake:
         raise AssertionError('모르는 주소')
 
 
-def run(m, root):
+def run(m, root, dart_only=False):
     out = io.StringIO()
     m.ROOT, m.OUT = root, os.path.join(root, 'stocks')
     with contextlib.redirect_stdout(out):
         try:
-            rc = m.main()
+            rc = m.main_dart() if dart_only else m.main()
         except m.ApiError as e:
             print('실패:', e)
             rc = 1
@@ -217,12 +264,77 @@ def main():
         caps = json.loads(F['caps.json'])['items']
         ok('시가총액 상위 목록: 큰 순서·250개까지', 0 < len(caps) <= 250 and all(caps[i][3] >= caps[i + 1][3] for i in range(len(caps) - 1)) and len(caps[0]) == 5, f'{len(caps)}개')
 
+        # 전 종목 목록 (시장 지도·내 종목)
+        allj = json.loads(F['all.json'])
+        rows = allj['items']
+        by = {r[0]: r for r in rows}
+        ok('전 종목: 모든 종목·큰 순서·[코드,이름,시장,종가,등락률,시총(억),업종]', len(rows) == len(fake.stocks) and all(len(r) == 7 for r in rows)
+           and all(rows[i][5] >= rows[i + 1][5] for i in range(len(rows) - 1)) and allj['asof'] == '2026-11-25', f'{len(rows)}개')
+        ok('전 종목: 종가·등락률이 시세와 같음', by['005930'][3] == sam['d'][-1][4] and by['005930'][4] == fake.rate('005930', last) and any(r[4] for r in rows),
+           json.dumps(by['005930'], ensure_ascii=False))
+        ok('전 종목: 시장 0 코스피·1 코스닥, 시총은 억 원', by['005930'][2] == 0 and all(r[2] in (0, 1) for r in rows)
+           and by['005930'][5] == round(int(fake.item('005930', last)['mrktTotAmt']) / 1e8))
+        cos_j = json.loads(F['companies.json'])
+        ok('전 종목: 큰 업종(삼성전자 반도체·전자, 하나금융 금융, 회사 정보 없으면 기타)', allj['secs'] == m.MAP_SECS and m.MAP_SECS[by['005930'][6]] == '반도체·전자'
+           and m.MAP_SECS[by['086790'][6]] == '금융' and all(r[6] == 0 for r in rows if r[0] not in cos_j), f"{by['005930'][6]},{by['086790'][6]}")
+        ok('큰 업종: 분류 코드 앞자리(긴 것부터)·지주회사·예외 회사', [m.map_sec('X', '', k) for k in ('20423', '29271', '70113', '28202', '221', '30121', '64121', '')]
+           == [13, 1, 5, 2, 3, 3, 6, 0] and m.map_sec('086520', '에코프로', '64992') == 2 and m.map_sec('034730', 'SK', '64992') == 16
+           and m.map_sec('055550', '신한지주', '64992') == 6)
+
+        # 최근 공시 (오늘의 공시)
+        dj = json.loads(F['dart.json'])
+        want = {r['rcept_no']: r for ty in 'IB' for r in fake.filings[ty] if r['_cat'] and r['rcept_dt'] in ('20261126', '20261125', '20261124')}
+        got = {x[0]: x for x in dj['items']}
+        ok('공시: 최근 3일·코스피/코스닥·분류되는 것만 빠짐없이', set(got) == set(want) and dj['asof'] == '2026-11-26', f'{len(got)}건 / 기대 {len(want)}건')
+        ok('공시: 분류가 맞음', all(got[k][5] == want[k]['_cat'] for k in got), json.dumps([[got[k][4], got[k][5]] for k in list(got)[:3]], ensure_ascii=False))
+        ok('공시: 최신 순서·[번호,코드,이름,시장,제목,분류,시총]', [x[0] for x in dj['items']] == sorted(got, reverse=True) and all(len(x) == 7 for x in dj['items']))
+        ok('공시: IR·특허·코넥스·비상장은 빼요', not [x for x in dj['items'] if 'IR' in x[4] or '특허' in x[4]] and all(x[1] for x in dj['items']))
+        sam_rows = [x for x in dj['items'] if x[1] == '005930']
+        ok('공시: 정정 머리말은 두고 분류는 본문으로·시총 붙임', any(x[4].startswith('[기재정정]') and x[5] == 'deal' for x in dj['items'])
+           and sam_rows and all(x[6] == by['005930'][5] and x[3] == 0 for x in sam_rows))
+        ok('공시: 분류 이름 목록', dj['cats'] == [[c, nm] for c, nm, _ in m.DART_CATS] and dj['src'] == [m.DART_SRC])
+        lc = [c[1] for c in fake.calls if c[0].endswith('list.json')]
+        ok('공시: 주요사항(B)·거래소(I) 모든 페이지', {c['pblntf_ty'] for c in lc} == {'B', 'I'} and max(int(c['page_no']) for c in lc if c['pblntf_ty'] == 'I') >= 5, f'{len(lc)}번')
+
         # 2) 같은 날 다시 실행 → 바뀐 것 없음, 시세 재요청 최소
         fake.calls.clear()
         rc, log = run(m, tmp)
         ok('같은 날 다시: 파일 그대로', rc == 0 and files(tmp) == F, log.strip().splitlines()[-1])
         hist_calls = [c for c in fake.calls if 'likeSrtnCd' in c[1] and c[1]['likeSrtnCd'] != '005930']
         ok('같은 날 다시: 종목 일봉은 안 받음', not hist_calls, f'{len(hist_calls)}번')
+
+        # 2-1) 지도 종목은 시가총액 상위 150 밖이어도 회사 정보(업종)를 받아요
+        tmp7 = tempfile.mkdtemp()
+        shutil.copy(os.path.join(tmp, 'market.json'), tmp7)
+        shutil.copytree(os.path.join(tmp, 'tools'), os.path.join(tmp7, 'tools'))
+        m.UNIVERSE = 5
+        rc, log = run(m, tmp7)
+        m.UNIVERSE = 150
+        a7 = json.loads(files(tmp7)['all.json'])['items']
+        top_k = [r for r in a7 if r[2] == 0][:m.MAP_KOSPI] + [r for r in a7 if r[2] == 1][:m.MAP_KOSDAQ]
+        ok('지도 종목(코스피 50·코스닥 30)은 업종을 알아요', rc == 0 and len(top_k) == m.MAP_KOSPI + m.MAP_KOSDAQ and all(r[6] for r in top_k),
+           f'{sum(1 for r in top_k if r[6])}/{len(top_k)}')
+        shutil.rmtree(tmp7)
+
+        # 2-2) 저녁: 공시만 다시 받기 (--dart-only)
+        m_nd = load({'DATA_GO_KR_KEY': FAKE_FSC})
+        rc, log = run(m_nd, tmp, dart_only=True)
+        ok('공시만: 다트 키 없으면 건너뜀', rc == 0 and files(tmp) == F and '건너뛰어요' in log, log.strip()[-50:])
+        fake_e = Fake(names, last)
+        fake_e.today = dt.date(2026, 11, 27)
+        fake_e.filings = fake_e.make_filings()
+        m.HTTP, m.NOW = fake_e, dt.datetime(2026, 11, 27, 18, 40, tzinfo=m.KST)
+        m.DART_MAX = 60
+        rc, log = run(m, tmp, dart_only=True)
+        m.DART_MAX, m.HTTP, m.NOW = 900, fake, dt.datetime(2026, 11, 26, 14, 10, tzinfo=m.KST)
+        Fe = files(tmp)
+        de = json.loads(Fe['dart.json'])
+        ok('공시만: dart.json만 바뀌고 시세는 안 부름', rc == 0 and {k for k in Fe if Fe[k] != F.get(k)} == {'dart.json'}
+           and not [c for c in fake_e.calls if 'apis.data.go.kr' in c[0]], log.strip()[-60:])
+        ok('공시만: 새 날짜·최대 건수·시총은 all.json에서', de['asof'] == '2026-11-27' and len(de['items']) == 60 and de['items'][0][0].startswith('20261127')
+           and all(x[6] == by[x[1]][5] for x in de['items']) and de['updated'].startswith('2026-11-27T18:40'))
+        with open(os.path.join(tmp, 'stocks', 'dart.json'), 'w', encoding='utf-8') as f:
+            f.write(F['dart.json'])
 
         # 3) 다음 거래일
         fake2 = Fake(names, dt.date(2026, 11, 26))
