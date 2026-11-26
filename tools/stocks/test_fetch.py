@@ -151,7 +151,19 @@ def files(root):
 
 def main():
     tmp = tempfile.mkdtemp()
-    shutil.copy(os.path.join(REPO, 'market.json'), tmp)
+    # 진짜 market.json은 매일 바뀌니까(급등락 종목 등) 검사는 고정된 예시 파일로 해요
+    with open(os.path.join(tmp, 'market.json'), 'w', encoding='utf-8') as f:
+        json.dump({'markets': {'kospi': {'up': [{'name': '깨끗한나라우'}, {'name': '대성하이텍'}], 'down': [], 'big': [{'name': '삼성전자'}, {'name': 'SK하이닉스'}, {'name': '삼성전자우'}]},
+                               'kosdaq': {'up': [{'name': '하이브'}], 'big': []}},
+                   'flows': {'week': {'groups': [{'items': [['삼성전자', 1]]}]}},
+                   'league': {'assets': [{'id': 'samsung', 'ref': 'kospi:삼성전자'}, {'id': 'hynix', 'ref': 'kospi:SK하이닉스'}]}}, f, ensure_ascii=False)
+    os.makedirs(os.path.join(tmp, 'tools', 'stocks'), exist_ok=True)
+    with open(os.path.join(tmp, 'tools', 'stocks', 'league_list.json'), 'w', encoding='utf-8') as f:
+        json.dump({'secs': [['semi', '반도체·전자', '💾'], ['fin', '금융', '🏦']],
+                   'items': [{'id': 'samsung', 'code': '005930', 'name': '삼성전자', 'sec': 'semi', 'icon': '📱'},
+                             {'id': 'k086790', 'code': '086790', 'name': '하나금융지주', 'sec': 'fin', 'icon': '🏦'},
+                             {'id': 'k999990', 'code': '999990', 'name': '없는종목', 'sec': 'fin', 'icon': '❓'},
+                             {'id': 'bad id', 'code': '005380', 'name': '이름틀림', 'sec': 'fin'}]}, f, ensure_ascii=False)
     try:
         # 0) 키 없음
         m = load({})
@@ -159,6 +171,7 @@ def main():
         ok('키 없으면 건너뛰고 정상 종료', rc == 0 and not files(tmp) and '건너뛰어요' in log, log.strip()[:60])
 
         m = load({'DATA_GO_KR_KEY': FAKE_FSC, 'DART_API_KEY': FAKE_DART, 'BRANDFETCH_CLIENT_ID': 'idPublic123'})
+        m.ROOT, m.OUT = tmp, os.path.join(tmp, 'stocks')
         names = m.wanted_names()
         last = dt.date(2026, 11, 25)
         m.NOW = dt.datetime(2026, 11, 26, 14, 10, tzinfo=m.KST)
@@ -193,6 +206,16 @@ def main():
         n_files = len([f for f in F if f[0].isdigit()])
         ok('받을 종목 파일 수 (상위 40 + 시장 정보 종목)', 40 <= n_files <= 40 + len(names), f'{n_files}개')
         ok('companies.json 저장', len(json.loads(F['companies.json'])) >= n_files)
+        lgj = json.loads(F['league.json'])
+        ok('리그 종목: 목록대로·없는 코드와 틀린 id는 빼요', [x['id'] for x in lgj['items']] == ['samsung', 'k086790'] and lgj['asof'] == '2026-11-25' and lgj['secs'][0] == ['semi', '반도체·전자', '💾'], json.dumps([x['id'] for x in lgj['items']]))
+        x0 = lgj['items'][0]
+        ok('리그 종목: 종가 40개·마지막 날·오름차순', len(x0['c']) == 40 and x0['c'][-1] == ['2026-11-25', sam['d'][-1][4]] and x0['c'] == sorted(x0['c']), f"{len(x0['c'])}개")
+        yr = [r for r in sam['d'] if r[0] > '2025-11-25']
+        ok('리그 종목: 1년 최저·최고는 1년 장중 값', x0['y1'] == {'lo': min(r[3] for r in yr), 'hi': max(r[2] for r in yr), 'd': '2026-11-25'}, json.dumps(x0['y1']))
+        ok('리그 종목: 이름·업종·아이콘', x0['n'] == '삼성전자' and x0['sec'] == 'semi' and x0['icon'] == '📱' and lgj['items'][1]['n'] == '하나금융지주')
+        ok('리그 종목은 받을 종목 파일도 만들어요', '086790.json' in F)
+        caps = json.loads(F['caps.json'])['items']
+        ok('시가총액 상위 목록: 큰 순서·250개까지', 0 < len(caps) <= 250 and all(caps[i][3] >= caps[i + 1][3] for i in range(len(caps) - 1)) and len(caps[0]) == 5, f'{len(caps)}개')
 
         # 2) 같은 날 다시 실행 → 바뀐 것 없음, 시세 재요청 최소
         fake.calls.clear()

@@ -40,6 +40,8 @@ TOP_KOSPI, TOP_KOSDAQ = 30, 10
 UNIVERSE = 150           # 같은 업종 비교에 쓰는 시가총액 상위 종목 수
 KEEP_DAYS = 30           # 목록에서 빠진 종목 파일을 지우기까지 기다리는 날
 CO_REFRESH_DAYS, CO_MAX_PER_RUN = 60, 200
+LG_DAYS = 40             # league.json에 넣는 최근 종가 개수 (최근 4주 순위 + 여유)
+CAPS_TOP = 250           # caps.json에 넣는 시가총액 상위 종목 수
 SLEEP = 0.12
 SOURCES = [
     ['금융위원회_주식시세정보 (공공데이터포털)', 'https://www.data.go.kr/data/15094808/openapi.do'],
@@ -436,6 +438,34 @@ def wanted_names():
     return names
 
 
+def league_list():
+    """동료 리그 업종별 종목 목록 (tools/stocks/league_list.json). 이 종목들은 매일 종가·1년 최저최고를 stocks/league.json에 모아요."""
+    j = jload(os.path.join(ROOT, 'tools', 'stocks', 'league_list.json'), {})
+    secs = [s for s in (j.get('secs') or []) if isinstance(s, list) and len(s) >= 2 and isinstance(s[0], str)]
+    keys = {s[0] for s in secs}
+    out, seen_ids = [], set()
+    for e in j.get('items') or []:
+        if not isinstance(e, dict):
+            continue
+        c, i = str(e.get('code') or ''), str(e.get('id') or '')
+        if re.fullmatch(r'[0-9A-Z]{6}', c) and re.fullmatch(r'[a-z0-9]{1,16}', i) and e.get('sec') in keys and i not in seen_ids:
+            seen_ids.add(i)
+            out.append({'id': i, 'code': c, 'name': str(e.get('name') or ''), 'sec': e['sec'], 'icon': str(e.get('icon') or '')})
+    return secs, out
+
+
+def y1_of(rows):
+    """일봉 [날짜,시,고,저,종,거래량]에서 최근 1년(365일) 장중 최저·최고."""
+    if not rows:
+        return None
+    last = rows[-1][0]
+    cut = (dt.date.fromisoformat(last) - dt.timedelta(days=365)).isoformat()
+    yr = [r for r in rows if r[0] > cut]
+    lo = min((r[3] for r in yr if r[3] and r[3] > 0), default=None)
+    hi = max((r[2] for r in yr if r[2] and r[2] > 0), default=None)
+    return {'lo': lo, 'hi': hi, 'd': last} if lo and hi and hi > lo else None
+
+
 def peers_of(code, uni, cos, n=5):
     me = cos.get(code) or {}
     ic = me.get('indc') or ''
@@ -480,6 +510,11 @@ def main():
             missing.append(nm)
     if missing:
         log('이름으로 못 찾은 종목:', ', '.join(missing[:20]))
+    lg_secs, lg_items = league_list()
+    lg_missing = [e['code'] for e in lg_items if e['code'] not in snap]
+    want |= {e['code'] for e in lg_items if e['code'] in snap}
+    if lg_missing:
+        log('리그 종목 중 시세에 없는 코드:', ', '.join(lg_missing))
     for c in want:
         seen[c] = day_iso
     keep = {c for c, d in seen.items() if c in snap and (dt.date.fromisoformat(day_iso) - dt.date.fromisoformat(d)).days <= KEEP_DAYS}
@@ -597,6 +632,21 @@ def main():
     if body != {k: old_idx.get(k) for k in body}:
         changed += jsave(idx_path, {'v': 1, 'updated': NOW.strftime('%Y-%m-%dT%H:%M:00+09:00'), **body})
     changed += jsave(co_path, cos)
+
+    # 동료 리그 업종별 종목: 최근 종가 40개 + 1년 최저·최고 (앱이 이 파일 하나만 받아요)
+    if lg_items:
+        lg_out = []
+        for e in lg_items:
+            rows = (hists.get(e['code']) or ([],))[0]
+            if not rows:
+                continue
+            lg_out.append({'id': e['id'], 'code': e['code'], 'n': snap[e['code']]['n'] if e['code'] in snap else e['name'], 'sec': e['sec'],
+                           'icon': e['icon'], 'c': [[r[0], r[4]] for r in rows[-LG_DAYS:] if r[4]], 'y1': y1_of(rows)})
+        changed += jsave(os.path.join(OUT, 'league.json'), {'v': 1, 'asof': day_iso, 'secs': lg_secs, 'items': lg_out, 'src': SOURCES[:1]})
+
+    # 시가총액 상위 목록 (업종별 탑 5를 다시 고를 때 써요)
+    top = sorted(snap, key=lambda c: -(snap[c]['cap'] or 0))[:CAPS_TOP]
+    changed += jsave(os.path.join(OUT, 'caps.json'), {'v': 1, 'asof': day_iso, 'items': [[c, snap[c]['n'], snap[c]['m'], snap[c]['cap'], (cos.get(c) or {}).get('indc') or ''] for c in top]})
     log(f"끝: 바뀐 파일 {changed}개 · API 호출 금융위 {CALLS['fsc']}번 · DART {CALLS['dart']}번")
     return 0
 
