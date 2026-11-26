@@ -2252,7 +2252,7 @@ function lgEditor(A, os, act, ro, T) {
       minus.addEventListener('click', () => { click(); const v = (ui.lgDraft.w[a.id] || 0) - 1; if (v > 0) ui.lgDraft.w[a.id] = v; else delete ui.lgDraft.w[a.id]; draw(); });
       plus.addEventListener('click', () => { if (chipsSum(ui.lgDraft.w) >= LG_CHIPS) return; click(); ui.lgDraft.w[a.id] = (ui.lgDraft.w[a.id] || 0) + 1; draw(); });
       const nm = h('div', { class: 'nm' + (a.code ? ' lk' : '') }, h('b', {}, a.name), a.kind ? h('small', {}, a.kind) : null,
-        h('small', { class: 'px num' }, pxTxt(a, px.v), px.pct != null ? h('span', { class: dirOf(px.pct) }, ' ' + pctStr(px.pct)) : null, a.late ? ` · ${md(px.d)}` : null));
+        h('small', { class: 'px num' }, pxTxt(a, px.v), px.pct != null ? h('span', { class: dirOf(px.pct) }, ' ' + pctStr(px.pct)) : null));
       // 한국 종목은 이름을 누르면 차트·회사 정보를 봐요
       if (a.code) { nm.setAttribute('role', 'button'); nm.setAttribute('tabindex', '0'); nm.setAttribute('aria-label', `${a.name} 차트·회사 정보 보기`); nm.addEventListener('click', () => { click(); openStock(a.code); }); }
       return h('div', { class: 'lg-a' + (n ? ' on' : '') },
