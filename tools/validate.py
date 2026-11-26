@@ -309,7 +309,8 @@ else:
         pos = [x.get('a') for x in its if isinstance(x, dict)]
         if len(set(pos)) == 1 and len(pos) >= 3: warn('quiz.items', '정답 위치가 모두 같아요. 섞어 주세요')
 
-TABIDS = ('movers', 'must', 'brokers', 'kr', 'global', 'flows', 'chain', 'wallet', 'whatif', 'words', 'quiz', 'predict', 'league', 'ask')
+TABIDS = ('movers', 'must', 'brokers', 'kr', 'global', 'flows', 'chain', 'wallet', 'whatif', 'words', 'quiz', 'predict', 'league', 'ask',
+          'map', 'dart', 'my', 'ipo', 'earn', 'weekly')
 ak = d.get('ask')
 if not isinstance(ak, dict): err('ask', '없어요 (물어보면 탭)')
 else:
@@ -456,12 +457,104 @@ else:
     if len(set(aids)) != len(aids): err('league.assets', 'id가 겹쳐요')
     sources(lg, 'sources', 'league', req=False)
 
+# ---------- 공모주 달력 · 실적 발표 · 한 주 돌아보기 (11/27 추가) ----------
+def day_of(v, q, req=True):
+    if v is None:
+        if req: err(q, '없어요')
+        return None
+    if not (isinstance(v, str) and DATE.match(v)): err(q, 'YYYY-MM-DD 형식이어야 해요'); return None
+    try: return datetime.date.fromisoformat(v)
+    except ValueError: err(q, f'없는 날짜예요 ({v})'); return None
+try: kr_day = datetime.date.fromisoformat(str((d.get('asof') or {}).get('kr')))
+except ValueError: kr_day = None
+CODE = re.compile(r'^([0-9A-Z]{6}|[A-Z][A-Z.]{0,5})$')
+
+ipo = d.get('ipo')
+if not isinstance(ipo, dict): err('ipo', '없어요 (공모주 달력 탭)')
+else:
+    s(ipo, 'intro', 'ipo', req=False, maxlen=90); s(ipo, 'note', 'ipo', req=False, maxlen=140)
+    its = lst(ipo, 'items', 'ipo')
+    if not its and not (isinstance(ipo.get('empty'), str) and ipo['empty'].strip()): err('ipo.empty', '일정이 없으면 empty에 한 줄로 알려 주세요')
+    s(ipo, 'empty', 'ipo', req=False, maxlen=80)
+    if len(its) > 10: warn('ipo.items', '10개 이하 권장 (다음 2~3주만)')
+    for i, x in enumerate(its):
+        q = f'ipo.items[{i}]'
+        if not isinstance(x, dict): err(q, '객체여야 해요'); continue
+        s(x, 'name', q, maxlen=20); s(x, 'what', q, maxlen=40); s(x, 'price', q, maxlen=30)
+        s(x, 'lead', q, req=False, maxlen=30); s(x, 'comp', q, req=False, maxlen=30); s(x, 'note', q, req=False, maxlen=80)
+        if x.get('mkt') not in ('코스피', '코스닥'): err(f'{q}.mkt', "'코스피' 또는 '코스닥'")
+        if 'fixed' in x and not isinstance(x['fixed'], bool): err(f'{q}.fixed', 'true/false')
+        sub = x.get('sub')
+        if not (isinstance(sub, list) and len(sub) == 2): err(f'{q}.sub', '[청약 시작일, 끝나는 날] 두 날짜예요'); continue
+        a_, b_ = day_of(sub[0], f'{q}.sub[0]'), day_of(sub[1], f'{q}.sub[1]')
+        if a_ and b_ and a_ > b_: err(f'{q}.sub', '시작일이 끝나는 날보다 뒤예요')
+        li = day_of(x.get('list'), f'{q}.list', req=False)
+        if li and b_ and li <= b_: err(f'{q}.list', '상장일은 청약 끝난 뒤예요')
+        last_day = li or b_
+        if last_day and kr_day and (kr_day - last_day).days > 7: warn(q, f'{last_day}에 끝난 일정이에요. 지난 일정은 빼 주세요')
+    sources(ipo, 'sources', 'ipo')
+
+ea = d.get('earnings')
+if not isinstance(ea, dict): err('earnings', '없어요 (실적 발표 탭)')
+else:
+    s(ea, 'intro', 'earnings', req=False, maxlen=90); s(ea, 'season', 'earnings', req=False, maxlen=80)
+    its = lst(ea, 'items', 'earnings')
+    if not its and not ea.get('season'): err('earnings.season', '일정이 없으면 season에 다음 실적 시즌을 한 줄로 써 주세요')
+    if len(its) > 12: warn('earnings.items', '12개 이하 권장')
+    days_ = []
+    for i, x in enumerate(its):
+        q = f'earnings.items[{i}]'
+        if not isinstance(x, dict): err(q, '객체여야 해요'); continue
+        dd = day_of(x.get('d'), f'{q}.d')
+        if dd: days_.append(dd)
+        s(x, 'name', q, maxlen=20); s(x, 'kst', q, maxlen=30); s(x, 'why', q, maxlen=70)
+        s(x, 'q', q, req=False, maxlen=24); s(x, 'exp', q, req=False, maxlen=70); s(x, 'res', q, req=False, maxlen=110); s(x, 'note', q, req=False, maxlen=60)
+        if x.get('mkt') not in ('한국', '미국'): err(f'{q}.mkt', "'한국' 또는 '미국'")
+        if 'code' in x and not (isinstance(x['code'], str) and CODE.match(x['code'])): err(f'{q}.code', '한국 6자리 코드나 미국 티커예요')
+        if 'tone' in x and x['tone'] not in DIRS: err(f'{q}.tone', '-1, 0, 1 중 하나')
+        if 'tone' in x and not x.get('res'): err(f'{q}.tone', '결과(res)가 있을 때만 써요')
+        if dd and kr_day and (kr_day - dd).days > 10: warn(q, f'{dd} 발표예요. 열흘 넘게 지난 건 빼 주세요')
+        if dd and kr_day and dd > kr_day and x.get('res'): warn(f'{q}.res', '아직 발표 전인데 결과가 있어요')
+    if days_ != sorted(days_): warn('earnings.items', '날짜 순서로 놓아 주세요')
+    sources(ea, 'sources', 'earnings')
+
+def weekly_body(w, p, cur=True):
+    wd = monday(w.get('wk'), f'{p}.wk')
+    s(w, 'title', p, maxlen=24); s(w, 'take', p, req=cur, maxlen=120)
+    strlist(w, 'points', p, mn=1, maxlen=80); strlist(w, 'next', p, req=False, maxlen=60)
+    if len(w.get('points') or []) > 4: warn(f'{p}.points', '4개 이하 권장')
+    ds = []
+    for i, x in enumerate(lst(w, 'days', p)):
+        q = f'{p}.days[{i}]'
+        if not (isinstance(x, list) and len(x) == 2 and isinstance(x[1], str) and x[1].strip()): err(q, '["YYYY-MM-DD", "한 줄"] 형식이에요'); continue
+        dd = day_of(x[0], f'{q}[0]')
+        if TAG.search(x[1]): err(f'{q}[1]', 'HTML 태그는 쓰지 않아요')
+        elif len(x[1]) > 60: warn(f'{q}[1]', f'{len(x[1])}자, 60자 이하 권장')
+        if dd and wd and not (wd <= dd <= wd + datetime.timedelta(days=4)): err(f'{q}[0]', f'{wd} 주의 월~금 날짜가 아니에요')
+        if dd: ds.append(dd)
+    if ds != sorted(set(ds)): err(f'{p}.days', '날짜가 겹치거나 순서가 달라요')
+    return wd
+wk = d.get('weekly')
+if not isinstance(wk, dict): err('weekly', '없어요 (한 주 돌아보기 탭)')
+else:
+    wd = weekly_body(wk, 'weekly')
+    if 'done' in wk and not isinstance(wk['done'], bool): err('weekly.done', 'true/false')
+    if wd and kr_day and not (wd <= kr_day <= wd + datetime.timedelta(days=6)): warn('weekly.wk', f'asof.kr({kr_day})가 있는 주가 아니에요. 새 주로 넘겨 주세요')
+    la = wk.get('last')
+    if la is not None:
+        if not isinstance(la, dict): err('weekly.last', '객체여야 해요')
+        else:
+            ld = weekly_body(la, 'weekly.last')
+            if ld and wd and ld >= wd: err('weekly.last.wk', 'weekly.wk보다 앞선 주여야 해요')
+    sources(wk, 'sources', 'weekly', req=False)
+
 # ---------- 매달린 캐릭터 대사 peek (선택, 11/26부터) ----------
 # 앱은 자리마다 대사 3개까지(40자에서 잘라요)와 표정 하나를 써요. 없거나 틀린 자리는 앱이 숫자로 대사를 만들어요.
 # 기본 13곳 + 14개 탭 전체로 늘린 자리(11/26). quizRes(퀴즈 결과)는 점수에 맞춰 앱이 만들어서 데이터로 안 써요.
 PK_IDS = ('hl', 'index', 'movers', 'mover2', 'oneLine', 'card1', 'card2', 'brokers', 'krMood', 'krPoints', 'globalMood', 'flowToday', 'flowMonth',
           'big', 'radar', 'watch', 'cal', 'cty1', 'cty3', 'flowWeek', 'flowStats', 'flowTake', 'chain1', 'chain2', 'chain3', 'fx', 'walletItems', 'loan', 'tips',
-          'back', 'sc1', 'sc2', 'rules', 'words', 'wordMid', 'quiz', 'predict', 'pdQ3', 'pdLast', 'league', 'lgMine', 'lgBody', 'ask', 'ask4')
+          'back', 'sc1', 'sc2', 'rules', 'words', 'wordMid', 'quiz', 'predict', 'pdQ3', 'pdLast', 'league', 'lgMine', 'lgBody', 'ask', 'ask4',
+          'map', 'dart', 'my', 'ipo', 'earn', 'weekly')
 PK_MK = ('index', 'movers', 'mover2', 'big')
 PK_MOODS = ('shock', 'dizzy', 'peek', 'cheer', 'sweat', 'tired', 'party', 'puzzled', 'sad', 'angry', 'love', 'cool', 'sly')
 def pk_entry(v, q):
