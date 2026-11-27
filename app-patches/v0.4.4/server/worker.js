@@ -14,6 +14,7 @@ const CORS = {
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const isObj = x => !!x && typeof x === 'object' && !Array.isArray(x);
 const fin = x => typeof x === 'number' && Number.isFinite(x);
+const emptyRec = r => !r || ((!Array.isArray(r.lg) || !r.lg.length) && (!isObj(r.pr) || !Object.keys(r.pr).length));
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
   status,
   headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...CORS },
@@ -83,8 +84,9 @@ export default {
       const c = clean(body, now);
       if (!c) return json({ ok: false, err: 'shape' }, 400);
       const cur = await env.LG.get('p:' + id, 'json');
-      // 다른 폰에서 더 나중에 바꾼 기록이 있으면 덮어쓰지 않고 그걸 돌려줘요
-      if (cur && fin(cur.at) && cur.at > c.at) return json({ ok: false, err: 'stale', cur }, 409);
+      // 다른 폰에서 더 나중에 바꾼 기록이 있으면 덮어쓰지 않고 그걸 돌려줘요.
+      // 단, 서버 기록이 비어 있으면(고른 답·주문 0개) 막지 않아요. 앱도 빈 기록은 '없음'으로 보고 이 폰 기록을 올려요.
+      if (cur && fin(cur.at) && cur.at > c.at && !(emptyRec(cur) && !emptyRec(c))) return json({ ok: false, err: 'stale', cur }, 409);
       const rev = ((cur && cur.rev) || 0) + 1;
       const rec = { ...c, rev, t: now };
       await env.LG.put('p:' + id, JSON.stringify(rec));

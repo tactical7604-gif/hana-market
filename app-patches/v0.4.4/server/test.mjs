@@ -24,4 +24,11 @@ let [s, j, cors] = await call('GET', '/v1/all'); t('empty all', s === 200 && j.v
 const r = await w.fetch(new Request(B + '/v1/all', { method: 'OPTIONS' }), env); t('options cors', r.status === 204 && r.headers.get('access-control-allow-methods').includes('PUT'));
 [s, j] = await call('PUT', '/v1/p/sunyoung', { at: now, pr: { 'bad': { q: [0, 1] }, '2026-11-16': { 'Q!': [0, 1], ok: [9, 1], ok2: [2, now] } }, lg: [[now + 999, { a: 1 }]] }); t('filters bad', s === 200);
 [s, j] = await call('GET', '/v1/all'); t('filtered content', JSON.stringify(j.p.sunyoung.pr) === JSON.stringify({ '2026-11-16': { ok2: [2, now] } }) && j.p.sunyoung.lg.length === 0, JSON.stringify(j.p.sunyoung));
+// 빈 기록(테스트로 담았다 뺀 것)이 더 나중이어도, 폰에 있던 진짜 기록은 올라가야 해요
+[s, j] = await call('PUT', '/v1/p/sanggyeong', { at: now - 10, pr: {}, lg: [[now - 20, { samsung: 1 }]] }); t('seed', s === 200 && j.rev === 1);
+[s, j] = await call('PUT', '/v1/p/sanggyeong', { at: now, pr: {}, lg: [] }); t('emptied later', s === 200 && j.rev === 2);
+[s, j] = await call('PUT', '/v1/p/sanggyeong', { at: now - 3600, pr: { '2026-11-23': { q1: [0, now - 3600] } }, lg: [[now - 4000, { hynix: 2 }]] }); t('older real rec beats newer empty', s === 200 && j.rev === 3, JSON.stringify(j));
+[s, j] = await call('GET', '/v1/all'); t('real rec kept', j.p.sanggyeong.lg[0][1].hynix === 2 && j.p.sanggyeong.pr['2026-11-23'].q1[0] === 0, JSON.stringify(j.p.sanggyeong));
+[s, j] = await call('PUT', '/v1/p/sanggyeong', { at: now - 7200, pr: {}, lg: [] }); t('older empty still rejected', s === 409 && j.cur.rev === 3);
+[s, j] = await call('PUT', '/v1/p/sanggyeong', { at: now - 7200, pr: {}, lg: [[now - 7300, { samsung: 1 }]] }); t('older real vs newer real rejected', s === 409);
 console.log(`ok ${ok} bad ${bad}`);
